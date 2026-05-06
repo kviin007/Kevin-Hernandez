@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-dim: #fff5f7;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #fffafb;
+  --color-surface-container: #fff1f3;
+  --color-surface-container-high: #fce7eb;
+  --color-surface-container-highest: #fbcfe8;
+  --color-on-surface: #4a1d1d;
+  --color-on-surface-variant: #8b5e5e;
+  --color-inverse-surface: #4a1d1d;
+  --color-inverse-on-surface: #fff1f3;
+  --color-outline: #f9d5da;
+  --color-outline-variant: #fce7eb;
+  --color-surface-tint: #ec4899;
+  --color-primary: #ec4899;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #fff1f3;
+  --color-on-primary-container: #9d174d;
+  --color-inverse-primary: #fbcfe8;
+  --color-secondary: #0ea5e9;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #e0f2fe;
+  --color-on-secondary-container: #0369a1;
+  --color-tertiary: #10b981;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #ecfdf5;
+  --color-on-tertiary-container: #065f46;
+  --color-error: #ef4444;
+  --color-on-error: #ffffff;
+  --color-error-container: #fee2e2;
+  --color-on-error-container: #991b1b;
+  --color-background: #fffafa;
+  --color-on-background: #4a1d1d;
+  --color-surface-variant: #fff1f3;
+
+  --font-h1: "Playfair Display", serif;
+  --font-h2: "Playfair Display", serif;
+  --font-body-lg: "Inter", sans-serif;
+  --font-body-sm: "Inter", sans-serif;
+  --font-label-caps: "Inter", sans-serif;
+  --font-display-grid: "Inter", sans-serif;
+
+  --radius-sm: 8px;
+  --radius-DEFAULT: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 32px;
+  --radius-full: 9999px;
+
+  --spacing-grid-gap: 24px;
+  --spacing-container-padding: 32px;
+  --spacing-stack-sm: 12px;
+  --spacing-stack-md: 20px;
+  --spacing-stack-lg: 32px;
+  --spacing-touch-target-min: 44px;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-on-background;
+    font-family: "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;900&display=swap');
+
+/* Professional Shadows & Accents */
+.professional-shadow {
+  box-shadow: 0 4px 20px -2px rgba(236, 72, 153, 0.1);
+}
+
+.panel-card {
+  @apply bg-white border border-pink-100 rounded-xl shadow-sm overflow-hidden;
+}
+
+.status-pill {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider;
+}
+
+.pill-blue { @apply bg-sky-50 text-sky-700; }
+.pill-green { @apply bg-emerald-50 text-emerald-700; }
+.pill-red { @apply bg-rose-50 text-rose-700; }
+.pill-pink { @apply bg-pink-50 text-pink-700; }
+
+.btn-primary {
+  @apply bg-primary text-on-primary font-semibold py-2.5 px-6 rounded-full shadow-md hover:bg-pink-600 transition-all active:scale-95 disabled:opacity-50 text-sm tracking-wide;
+}
+
+.btn-secondary {
+  @apply bg-white text-primary border border-pink-200 font-semibold py-2.5 px-6 rounded-full shadow-sm hover:bg-pink-50 transition-colors text-sm tracking-wide;
+}

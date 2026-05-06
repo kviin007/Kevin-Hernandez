@@ -1,0 +1,205 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Information about a registered customer or administrator.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "points": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Service offered by the salon (e.g., Manicure, Pedicure).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "duration": { "type": "number" },
+        "category": { "type": "string" },
+        "image": { "type": "string" }
+      },
+      "required": ["name", "price", "duration"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product sold in the online shop.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "image": { "type": "string" }
+      },
+      "required": ["name", "price", "stock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A product purchase history record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "price": { "type": "number" },
+        "quantity": { "type": "number" },
+        "pointsEarned": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "productId", "price", "quantity"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer feedback and ratings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "targetId": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "targetId", "rating"]
+    },
+    "PointsLog": {
+      "title": "PointsLog",
+      "description": "History of loyalty points earned/spent.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "reason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "reason"]
+    },
+    "Availability": {
+      "title": "Availability",
+      "description": "Daily slots available for bookings.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "slots": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["date", "slots"]
+    },
+    "Promotion": {
+      "title": "Promotion",
+      "description": "Promotional offers and discounts.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "discountPercent": { "type": "number" },
+        "code": { "type": "string" },
+        "active": { "type": "boolean" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "frequency": { "type": "string", "enum": ["diaria", "semanal", "mensual", "unica"] },
+        "expiry": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "code", "active"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "An appointment booking made by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "serviceId": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "feedbackRef": { "type": "string" }
+      },
+      "required": ["userId", "serviceId", "date", "time", "status"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Anonymous feedback collected after a service or purchase.",
+      "type": "object",
+      "properties": {
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["booking", "order"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rating", "targetId", "targetType"]
+    },
+    "Moodboard": {
+      "title": "Moodboard",
+      "description": "User's collection of inspirational nail designs.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "source": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "image"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and settings."
+    },
+    "/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Salon services catalog."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Salon products catalog."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "User appointments."
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "User feedback data."
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Product purchase history."
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Product and service ratings."
+    },
+    "/points_logs/{logId}": {
+      "schema": "PointsLog",
+      "description": "History of loyalty points."
+    },
+    "/availability/{date}": {
+      "schema": "Availability",
+      "description": "Booking availability slots per day."
+    },
+    "/promotions/{promoId}": {
+      "schema": "Promotion",
+      "description": "Salon promotions and offers."
+    },
+    "/moodboards/{itemId}": {
+      "schema": "Moodboard",
+      "description": "User nail design inspirations."
+    }
+  }
+}
