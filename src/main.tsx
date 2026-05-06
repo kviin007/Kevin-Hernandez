@@ -4,11 +4,12 @@ import App from './App.tsx';
 import './index.css';
 
 import {AuthProvider} from './components/AuthContext.tsx';
+import { setupPWA } from './registerSW';
+
+setupPWA();
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
-  </StrictMode>,
+  <AuthProvider>
+    <App />
+  </AuthProvider>
 );

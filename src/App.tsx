@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
+import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+import { Camera as MPCamera } from '@mediapipe/camera_utils';
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import { 
   Grid3X3, 
   ShoppingBag, 
@@ -41,6 +44,13 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from './components/AuthContext';
+import { Checkout } from './pages/Checkout';
+import { OrderConfirmada } from './pages/OrderConfirmada';
+import { CartIcon } from './components/cart/CartIcon';
+import { CartDrawer } from './components/cart/CartDrawer';
+import { ProductCard } from './components/products/ProductCard';
+import { useCartStore } from './stores/cartStore';
+
 import { 
   collection, 
   onSnapshot, 
@@ -60,6 +70,9 @@ import {
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { db, auth, OperationType, handleFirestoreError } from './lib/firebase';
+
+import { WompiCheckout } from './components/checkout/WompiCheckout';
+import { AdminView } from './components/AdminView';
 
 import { 
   BarChart, 
@@ -92,6 +105,10 @@ const notifyWhatsApp = (phone: string | undefined, message: string) => {
   }
   const url = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
   window.open(url, '_blank');
+};
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
 };
 
 const BrandLogo = ({ size = 'md', showSlogan = false }: { size?: 'sm' | 'md' | 'lg', showSlogan?: boolean }) => {
@@ -145,7 +162,7 @@ const BrandLogo = ({ size = 'md', showSlogan = false }: { size?: 'sm' | 'md' | '
 };
 
 // --- Types ---
-type View = 'landing' | 'grid' | 'shop' | 'booking' | 'loyalty' | 'settings' | 'messaging' | 'help' | 'checkout' | 'admin' | 'services_list' | 'ai_studio';
+type View = 'landing' | 'grid' | 'shop' | 'booking' | 'loyalty' | 'settings' | 'messaging' | 'help' | 'checkout' | 'admin' | 'services_list' | 'ai_studio' | 'order_confirmada';
 
 // --- New Auth Sub-component ---
 const AuthView = () => {
@@ -159,19 +176,21 @@ const AuthView = () => {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setMessage('');
+    setIsLoading(true);
 
-    if (!email) return setError('Ingresa tu correo o usuario.');
-    if (password.length < 5) return setError('La contraseña es demasiado corta.');
+    if (!email) { setIsLoading(false); return setError('Ingresa tu correo o usuario.'); }
+    if (password.length < 5)  { setIsLoading(false); return setError('La contraseña es demasiado corta.'); }
     
     if (!isLogin) {
-      if (!displayName) return setError('Ingresa tu nombre completo.');
-      if (!email.includes('@')) return setError('Ingresa un formato de correo válido.');
-      if (password.length < 6) return setError('Crea una contraseña de al menos 6 caracteres.');
+      if (!displayName) { setIsLoading(false); return setError('Ingresa tu nombre completo.'); }
+      if (!email.includes('@')) { setIsLoading(false); return setError('Ingresa un formato de correo válido.'); }
+      if (password.length < 6) { setIsLoading(false); return setError('Crea una contraseña de al menos 6 caracteres.'); }
     }
 
     try {
@@ -182,6 +201,8 @@ const AuthView = () => {
       }
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -190,11 +211,14 @@ const AuthView = () => {
       setError('Por favor ingresa tu correo para restablecer contraseña.');
       return;
     }
+    setIsLoading(true);
     try {
       await resetPassword(email);
       setMessage('Correo de restablecimiento enviado.');
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -282,8 +306,8 @@ const AuthView = () => {
           {error && <p className="text-red-500 text-[10px] font-bold text-center uppercase tracking-widest">{error}</p>}
           {message && <p className="text-emerald-500 text-[10px] font-bold text-center uppercase tracking-widest">{message}</p>}
 
-          <button type="submit" className="btn-primary w-full h-12 uppercase tracking-[0.2em] text-xs">
-            {isLogin ? 'Entrar' : 'Registrarme'}
+          <button type="submit" disabled={isLoading} className="btn-primary w-full h-12 uppercase tracking-[0.2em] text-xs disabled:opacity-50">
+            {isLoading ? 'Procesando...' : (isLogin ? 'Entrar' : 'Registrarme')}
           </button>
         </form>
 
@@ -368,7 +392,7 @@ const FeedbackModal = ({ isOpen, onClose, onFeedbackSubmit }: { isOpen: boolean,
   );
 };
 
-const Tooltip = ({ children, text }: { children: React.ReactNode, text: string }) => {
+const Tooltip = ({ children, text, ...props }: { children: React.ReactNode, text: string, [key: string]: any }) => {
   const [show, setShow] = useState(false);
   return (
     <div className="relative flex items-center" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
@@ -390,9 +414,10 @@ const Tooltip = ({ children, text }: { children: React.ReactNode, text: string }
   );
 };
 
-const Sidebar = ({ activeView, setView }: { activeView: View, setView: (v: View) => void }) => {
+const Sidebar = ({ activeView, setView, isMobile = false }: { activeView: View, setView: (v: View) => void, isMobile?: boolean }) => {
   const { isAdmin, logout } = useAuth();
-  const menuItems = [
+  
+  const baseMenuItems = [
     { id: 'landing', label: 'Inicio', icon: Grid3X3 },
     { id: 'services_list', label: 'Servicios', icon: Zap },
     { id: 'ai_studio', label: 'AI Nail Studio', icon: Sparkles },
@@ -404,12 +429,17 @@ const Sidebar = ({ activeView, setView }: { activeView: View, setView: (v: View)
     { id: 'settings', label: 'Ajustes', icon: Settings },
   ];
 
+  let menuItems = baseMenuItems;
+  
   if (isAdmin) {
-    menuItems.push({ id: 'admin', label: 'Panel Admin', icon: Lock });
+    menuItems = [
+      { id: 'admin', label: 'Panel Principal', icon: Grid3X3 },
+      ...baseMenuItems
+    ];
   }
 
   return (
-    <aside className="hidden md:flex flex-col border-r border-pink-100 h-screen w-64 fixed left-0 top-0 bg-white shadow-sm z-40 transition-all duration-300">
+    <aside className={`${isMobile ? 'flex' : 'hidden md:flex'} flex-col border-r border-pink-100 h-screen w-64 fixed left-0 top-0 bg-white shadow-sm z-40 transition-all duration-300`}>
       <div className="p-8 cursor-pointer mb-2 border-b border-pink-50/50" onClick={() => setView('landing')}>
         <BrandLogo size="sm" />
       </div>
@@ -448,12 +478,13 @@ const Sidebar = ({ activeView, setView }: { activeView: View, setView: (v: View)
   );
 };
 
-const TopBar = ({ title, onMenuClick, notifications, showNotifications, setShowNotifications }: { 
+const TopBar = ({ title, onMenuClick, notifications, showNotifications, setShowNotifications, setView }: { 
   title: string, 
   onMenuClick: () => void,
   notifications: any[],
   showNotifications: boolean,
-  setShowNotifications: (v: boolean) => void
+  setShowNotifications: (v: boolean) => void,
+  setView: (v: View) => void
 }) => {
   const { profile } = useAuth();
   return (
@@ -523,12 +554,18 @@ const TopBar = ({ title, onMenuClick, notifications, showNotifications, setShowN
               )}
             </AnimatePresence>
           </div>
+          <CartIcon />
           <div className="flex items-center gap-4 pl-6 border-l border-pink-50">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-black text-slate-800 font-h1 italic">{profile?.displayName || 'Jane Doe'}</p>
               <p className="text-[9px] text-pink-400 font-bold uppercase tracking-[0.2em]">{profile?.role === 'admin' ? 'Administrador' : `Nivel ${(profile?.points || 0) > 5000 ? 'Platinum' : 'Gold'}`}</p>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-pink-100 overflow-hidden cursor-pointer border-2 border-white shadow-lg hover:scale-110 transition-transform">
+            <div 
+              onClick={() => {
+                setView('settings');
+              }}
+              className="w-12 h-12 rounded-2xl bg-pink-100 overflow-hidden cursor-pointer border-2 border-white shadow-lg hover:scale-110 transition-transform"
+            >
               <img 
                 src={profile?.photoURL || "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop"} 
                 alt="User" 
@@ -542,771 +579,8 @@ const TopBar = ({ title, onMenuClick, notifications, showNotifications, setShowN
     </header>
   );
 };
- const AdminView = () => {
-  const [services, setServices] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [promotions, setPromotions] = useState<any[]>([]);
-  const [availability, setAvailability] = useState<any[]>([]);
-  const [viewType, setViewType] = useState<'services' | 'products' | 'customers' | 'promos' | 'slots'>('services');
-  const [adminActionStatus, setAdminActionStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
-  const showStatus = (type: 'success' | 'error', message: string) => {
-    setAdminActionStatus({ type, message });
-    setTimeout(() => setAdminActionStatus(null), 4000);
-  };
-
-  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [itemToDelete, setItemToDelete] = useState<{ col: string, id: string } | null>(null);
-
-  useEffect(() => {
-    const sQuery = query(collection(db, 'services'));
-    const pQuery = query(collection(db, 'products'));
-    const cQuery = query(collection(db, 'users'));
-    const bQuery = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
-    const oQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const prQuery = query(collection(db, 'promotions'));
-    const aQuery = query(collection(db, 'availability'));
-
-    const unsubS = onSnapshot(sQuery, (snap) => setServices(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'services'));
-    const unsubP = onSnapshot(pQuery, (snap) => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'products'));
-    const unsubC = onSnapshot(cQuery, (snap) => setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'users'));
-    const unsubB = onSnapshot(bQuery, (snap) => setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'bookings'));
-    const unsubO = onSnapshot(oQuery, (snap) => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'orders'));
-    const unsubPR = onSnapshot(prQuery, (snap) => setPromotions(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'promotions'));
-    const unsubA = onSnapshot(aQuery, (snap) => setAvailability(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'availability'));
-
-    return () => { unsubS(); unsubP(); unsubC(); unsubB(); unsubO(); unsubPR(); unsubA(); };
-  }, []);
-
-  const addService = async () => {
-    try {
-      await addDoc(collection(db, 'services'), {
-        name: 'Nuevo Servicio',
-        description: 'Descripción del servicio...',
-        price: 0,
-        duration: 30,
-        category: 'General',
-        image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?q=80&w=400&auto=format&fit=crop',
-        createdAt: serverTimestamp()
-      });
-      showStatus('success', 'Servicio agregado correctamente.');
-    } catch (e: any) { 
-      showStatus('error', 'Error al agregar servicio. Verifica permisos.');
-      handleFirestoreError(e, OperationType.CREATE, 'services'); 
-    }
-  };
-
-  const updateServiceField = async (id: string, field: string, value: any) => {
-    try {
-      await updateDoc(doc(db, 'services', id), { [field]: value });
-    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `services/${id}`); }
-  };
-
-  const addPromo = async () => {
-    try {
-      await addDoc(collection(db, 'promotions'), {
-        title: 'Nueva Promoción',
-        description: 'Detalles de la oferta...',
-        discountPercent: 10,
-        code: 'PROMO10',
-        active: true,
-        createdAt: serverTimestamp()
-      });
-      showStatus('success', 'Promoción creada.');
-    } catch (e: any) { 
-      showStatus('error', 'Error al crear promoción.');
-      handleFirestoreError(e, OperationType.CREATE, 'promotions'); 
-    }
-  };
-
-  const setSlot = async (date: string, slotsString: string) => {
-    try {
-      const slots = slotsString.split(',').map(s => s.trim());
-      await setDoc(doc(db, 'availability', date), { date, slots });
-      showStatus('success', 'Agenda actualizada para ' + date);
-    } catch (e: any) { 
-      showStatus('error', 'Error al actualizar agenda. Revisa el formato.');
-      handleFirestoreError(e, OperationType.WRITE, `availability/${date}`); 
-    }
-  };
-
-  const addProduct = async () => {
-    try {
-      await addDoc(collection(db, 'products'), {
-        name: 'Nuevo Producto',
-        description: 'Descripción del producto...',
-        price: 0,
-        stock: 0,
-        image: 'https://images.unsplash.com/photo-1626285861696-9f0bf5a49c6d?q=80&w=400&auto=format&fit=crop',
-        createdAt: serverTimestamp()
-      });
-      showStatus('success', 'Producto agregado.');
-    } catch (e: any) { 
-      showStatus('error', 'Error al agregar producto.');
-      handleFirestoreError(e, OperationType.CREATE, 'products'); 
-    }
-  };
-
-  const updateItem = async (col: string, id: string, data: any) => {
-    try {
-      await updateDoc(doc(db, col, id), data);
-    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `${col}/${id}`); }
-  };
-
-  const removeItem = async () => {
-    if (!itemToDelete) return;
-    try {
-      await deleteDoc(doc(db, itemToDelete.col, itemToDelete.id));
-      setItemToDelete(null);
-    } catch (e) { handleFirestoreError(e, OperationType.DELETE, `${itemToDelete.col}/${itemToDelete.id}`); }
-  };
-
-  const getCustomerBookings = (userId: string) => {
-    return bookings.filter(b => b.userId === userId);
-  };
-
-  const getCustomerOrders = (userId: string) => {
-    return orders.filter(o => o.userId === userId);
-  };
-
-  const lowStockProducts = products.filter(p => p.stock < (p.minStock || 5));
-
-  const totalRevenue = orders.reduce((acc, o) => acc + (o.price * o.quantity), 0);
-  const totalBookings = bookings.length;
-  const pendingBookings = bookings.filter(b => b.status === 'pending').length;
-
-  // Real-time chart data
-  const revenueData = orders.slice(0, 7).reverse().map(o => ({
-    name: new Date(o.createdAt?.toDate()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
-    total: o.price * o.quantity
-  }));
-
-  const bookingVolumeData = [
-    { name: 'Lun', citas: 12 }, { name: 'Mar', citas: 19 }, { name: 'Mie', citas: 15 },
-    { name: 'Jue', citas: 22 }, { name: 'Vie', citas: 30 }, { name: 'Sab', citas: 45 }, { name: 'Dom', citas: 10 }
-  ];
-
-  return (
-    <div className="space-y-14">
-      <AnimatePresence>
-        {adminActionStatus && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20, x: '-50%' }}
-            animate={{ opacity: 1, y: 0, x: '-50%' }}
-            exit={{ opacity: 0, y: -20, x: '-50%' }}
-            className={`fixed top-10 left-1/2 z-[200] px-8 py-4 rounded-2xl shadow-2xl border flex items-center gap-3 ${
-              adminActionStatus.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-red-600 text-white border-red-500'
-            }`}
-          >
-            {adminActionStatus.type === 'success' ? <CheckCircle2 size={18} /> : <Bell size={18} />}
-            <p className="text-xs font-black uppercase tracking-widest leading-none">{adminActionStatus.message}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {lowStockProducts.length > 0 && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-2xl flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Bell className="text-red-500 animate-bounce" size={24} />
-            <div>
-              <p className="text-sm font-black text-red-800 uppercase tracking-widest">Alerta de Stock Bajo</p>
-              <p className="text-xs text-red-600 italic">Tienes {lowStockProducts.length} productos por debajo del umbral mínimo.</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => setViewType('products')}
-            className="text-[10px] font-black underline text-red-700 uppercase tracking-widest"
-          >
-            Ver Productos
-          </button>
-        </div>
-      )}
-
-      {/* Analytics Dashboard Header */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-        {[
-          { label: 'Ingresos Totales', value: `$${totalRevenue.toFixed(2)}`, trend: '+12% vs mes anterior', icon: CreditCard, color: 'bg-emerald-50 text-emerald-600' },
-          { label: 'Citas Totales', value: totalBookings, trend: `${pendingBookings} pendientes`, icon: Calendar, color: 'bg-blue-50 text-blue-600' },
-          { label: 'Clientes Base', value: customers.length, trend: 'Crecimiento constante', icon: Award, color: 'bg-purple-50 text-purple-600' },
-          { label: 'Ventas Productos', value: orders.length, trend: 'Nuevos pedidos hoy', icon: ShoppingBag, color: 'bg-orange-50 text-orange-600' },
-        ].map((stat, i) => (
-          <div key={i} className="bg-white p-8 rounded-[40px] border border-pink-50 shadow-sm professional-shadow flex items-center gap-6">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${stat.color}`}>
-              <stat.icon size={24} />
-            </div>
-            <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
-              <h4 className="text-2xl font-black text-slate-800 font-h1 italic">{stat.value}</h4>
-              <p className="text-[10px] text-slate-400 italic mt-1">{stat.trend}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Real-time Analytics Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        <div className="bg-white p-10 rounded-[40px] border border-pink-50 shadow-sm professional-shadow">
-          <div className="flex justify-between items-center mb-10">
-            <div>
-              <h4 className="text-lg font-black text-slate-800 font-h1 italic">Evolución de Ventas</h4>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sincronización en tiempo real</p>
-            </div>
-            <div className="p-3 bg-emerald-50 text-emerald-500 rounded-2xl">
-              <Sparkles size={20} />
-            </div>
-          </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueData.length > 0 ? revenueData : bookingVolumeData}>
-                <defs>
-                  <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ec4899" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#ec4899" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} />
-                <YAxis hide />
-                <RechartsTooltip 
-                  contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  labelStyle={{ fontWeight: 'black', marginBottom: '4px' }}
-                />
-                <Area type="monotone" dataKey={revenueData.length > 0 ? "total" : "citas"} stroke="#ec4899" strokeWidth={3} fillOpacity={1} fill="url(#colorTotal)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-white p-10 rounded-[40px] border border-pink-50 shadow-sm professional-shadow">
-          <div className="flex justify-between items-center mb-10">
-            <div>
-              <h4 className="text-lg font-black text-slate-800 font-h1 italic">Volumen de Citas</h4>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Actividad de la última semana</p>
-            </div>
-            <div className="p-3 bg-blue-50 text-blue-500 rounded-2xl">
-              <Calendar size={20} />
-            </div>
-          </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={bookingVolumeData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} />
-                <YAxis hide />
-                <RechartsTooltip 
-                  cursor={{ fill: '#fdf2f8', radius: 12 }}
-                  contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                />
-                <Bar dataKey="citas" fill="#db2777" radius={[12, 12, 0, 0]} barSize={24} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-10 rounded-[40px] border border-pink-50 shadow-sm professional-shadow gap-8">
-        <div>
-          <h2 className="text-4xl font-black text-slate-800 font-h1 italic tracking-tight">Centro de Gestión</h2>
-          <p className="text-sm text-slate-400 mt-2 font-medium">Control total sobre servicios, productos y analítica de clientes.</p>
-        </div>
-        <div className="flex flex-wrap gap-4 bg-pink-50/30 p-2.5 rounded-[32px] border border-pink-100/50">
-          {[
-            { id: 'services', label: 'Servicios', icon: Sparkles },
-            { id: 'products', label: 'E-Shop', icon: ShoppingBag },
-            { id: 'promos', label: 'Promos', icon: Award },
-            { id: 'slots', label: 'Horarios', icon: Calendar },
-            { id: 'customers', label: 'Clientes', icon: Award }
-          ].map(tab => (
-            <button 
-              key={tab.id}
-              onClick={() => setViewType(tab.id as any)}
-              className={`flex items-center gap-3 px-8 py-4 rounded-[24px] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
-                viewType === tab.id 
-                  ? 'bg-primary text-white shadow-xl shadow-pink-200 scale-105' 
-                  : 'text-slate-400 hover:bg-white hover:text-primary'
-              }`}
-            >
-              <tab.icon size={16} />
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {viewType === 'promos' && (
-        <div className="grid grid-cols-1 gap-14">
-          <div className="flex justify-between items-center px-4">
-            <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">Promociones Activas ({promotions.length})</h3>
-            <div className="flex gap-4">
-              <button 
-                onClick={() => {
-                  const msg = "¡Nueva promoción en Yulied Play! Mira nuestras ofertas actuales en la app.";
-                  customers.forEach(c => notifyWhatsApp(c.phone, msg));
-                }}
-                className="btn-secondary px-6 py-4 rounded-[24px] text-[10px] flex items-center gap-2 bg-emerald-50 text-emerald-600 border-emerald-100"
-              >
-                <Phone size={16} /> NOTIFICAR TODOS (WA)
-              </button>
-              <button 
-                onClick={addPromo}
-                className="btn-primary px-8 py-4 rounded-[24px] text-[10px] flex items-center gap-2"
-              >
-                <Plus size={20} /> NUEVA PROMO
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-            {promotions.map(promo => (
-              <div key={promo.id} className="bg-white p-10 rounded-[40px] border border-pink-50 shadow-sm professional-shadow space-y-6">
-                <div className="flex justify-between items-start">
-                  <input 
-                    className="text-2xl font-black text-slate-800 font-h1 italic italic bg-transparent outline-none w-full"
-                    value={promo.title}
-                    placeholder="Título de promo"
-                    onChange={(e) => updateItem('promotions', promo.id, { title: e.target.value })}
-                  />
-                  <button 
-                    onClick={() => {
-                      const msg = `¡Hola! Tenemos una promoción para ti: ${promo.title}. Usa el código ${promo.code} para un descuento especial.`;
-                      notifyWhatsApp(undefined, msg); // Placeholder for targetedWA
-                    }}
-                    className="text-emerald-500 hover:scale-110 transition-transform"
-                  >
-                    <Phone size={20} />
-                  </button>
-                </div>
-                <input 
-                  className="text-xs font-black text-primary uppercase tracking-widest bg-pink-50/50 px-4 py-2 rounded-lg w-full outline-none"
-                  value={promo.code}
-                  placeholder="CÓDIGO"
-                  onChange={(e) => updateItem('promotions', promo.id, { code: e.target.value })}
-                />
-                <textarea 
-                  className="w-full bg-slate-50 p-4 rounded-2xl text-xs italic outline-none min-h-[80px]"
-                  value={promo.description}
-                  placeholder="Descripción..."
-                  onChange={(e) => updateItem('promotions', promo.id, { description: e.target.value })}
-                />
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Desde</label>
-                    <input 
-                      type="date"
-                      className="w-full bg-slate-50 px-4 py-3 rounded-xl text-[10px] outline-none"
-                      value={promo.startDate || ''}
-                      onChange={(e) => updateItem('promotions', promo.id, { startDate: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Hasta</label>
-                    <input 
-                      type="date"
-                      className="w-full bg-slate-50 px-4 py-3 rounded-xl text-[10px] outline-none"
-                      value={promo.endDate || ''}
-                      onChange={(e) => updateItem('promotions', promo.id, { endDate: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-between items-center bg-pink-50/30 p-4 rounded-2xl">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estado</span>
-                  <button 
-                    onClick={() => updateItem('promotions', promo.id, { active: !promo.active })}
-                    className={`w-12 h-6 rounded-full transition-all ${promo.active ? 'bg-primary' : 'bg-slate-200'} relative`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${promo.active ? 'right-1' : 'left-1'}`} />
-                  </button>
-                </div>
-                <button 
-                  onClick={() => setItemToDelete({ col: 'promotions', id: promo.id })}
-                  className="text-[9px] font-black text-red-300 hover:text-red-500 uppercase tracking-widest w-full text-center py-2"
-                >
-                  Eliminar Promo
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {viewType === 'slots' && (
-        <div className="bg-white p-12 rounded-[40px] border border-pink-50 shadow-sm professional-shadow">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
-            <div>
-              <h3 className="text-2xl font-black text-slate-800 font-h1 italic tracking-tight">Gestión de Disponibilidad</h3>
-              <p className="text-sm text-slate-500 italic mt-2">Agrega los días y horarios en los que tus especialistas están disponibles.</p>
-            </div>
-            <div className="flex items-center gap-4 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl border border-emerald-100">
-              <Calendar className="animate-pulse" size={20} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Agenda Abierta</span>
-            </div>
-          </div>
-          
-          <div className="space-y-10">
-            <div className="p-10 bg-slate-50 rounded-[40px] border border-slate-100 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-8 flex items-center gap-2">
-                <Plus className="text-primary" size={16} /> Programar Nueva Fecha
-              </h4>
-              <form onSubmit={(e: any) => {
-                e.preventDefault();
-                const d = e.target.date.value;
-                const s = e.target.slots.value;
-                if(d && s) setSlot(d, s);
-                e.target.reset();
-              }} className="flex flex-col lg:flex-row gap-6 relative z-10">
-                <div className="flex-1 space-y-3">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Seleccionar Fecha</label>
-                  <input name="date" type="date" className="w-full bg-white border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:border-primary transition-all shadow-sm" required />
-                </div>
-                <div className="flex-[2] space-y-3">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Horarios (Separados por coma)</label>
-                  <input name="slots" placeholder="EJ: 09:00, 10:00, 11:30, 15:00, 17:30..." className="w-full bg-white border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:border-primary transition-all shadow-sm placeholder:text-slate-200" required />
-                </div>
-                <div className="lg:pt-7 flex items-end">
-                  <button type="submit" className="w-full lg:w-auto btn-primary px-12 py-4 h-[56px] text-xs shadow-2xl shadow-pink-100 uppercase tracking-[0.2em]">Actualizar Agenda</button>
-                </div>
-              </form>
-            </div>
-
-            <div className="space-y-6">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest pl-2">Calendario de Próximos Días ({availability.length})</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {availability.sort((a,b) => a.date.localeCompare(b.date)).map(day => (
-                  <div key={day.id} className="bg-white p-8 rounded-[32px] border border-pink-50 shadow-sm relative group hover:shadow-xl transition-all duration-500">
-                    <button 
-                      onClick={() => deleteDoc(doc(db, 'availability', day.id))}
-                      className="absolute top-6 right-6 w-8 h-8 bg-slate-50 text-slate-300 hover:bg-red-50 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-red-100"
-                    >
-                      <Plus size={16} className="rotate-45" />
-                    </button>
-                    <div className="flex items-center gap-3 mb-6">
-                      <Calendar size={18} className="text-primary" />
-                      <p className="text-lg font-black text-slate-800 font-h1 italic">{new Date(day.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {day.slots.map((s: string) => (
-                        <span key={s} className="bg-pink-50/50 px-3 py-1.5 rounded-xl text-[10px] font-black text-primary border border-pink-100/50 tracking-tighter italic">{s}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {availability.length === 0 && (
-                  <div className="col-span-full py-20 text-center bg-slate-50 rounded-[40px] border-2 border-dashed border-slate-100">
-                     <Clock size={48} className="mx-auto text-slate-200 mb-4" />
-                     <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">No hay disponibilidad configurada</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {viewType === 'customers' && (
-        <div className="grid grid-cols-1 gap-10">
-          <div className="bg-white rounded-[40px] border border-pink-50 shadow-sm overflow-hidden professional-shadow">
-            <header className="px-10 py-8 bg-pink-50/20 border-b border-pink-50 flex justify-between items-center">
-              <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">Base de Datos de Clientes ({customers.length})</h3>
-            </header>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-pink-50 bg-pink-50/10">
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Cliente</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Puntos</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Citas Totales</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Nivel</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Última Actividad</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-pink-50">
-                  {customers.map((c) => {
-                    const cBookings = getCustomerBookings(c.id);
-                    return (
-                      <tr key={c.id} className="hover:bg-pink-50/20 transition-colors group">
-                        <td className="px-10 py-6">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-pink-100 overflow-hidden border-2 border-white shadow-md">
-                              <img src={c.photoURL || "https://i.pravatar.cc/150?u="+c.id} className="w-full h-full object-cover" />
-                            </div>
-                            <div>
-                              <p className="text-sm font-black text-slate-800 font-h1 italic">{c.displayName || 'Anonimo'}</p>
-                              <p className="text-[10px] text-slate-400">{c.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-10 py-6">
-                          <span className="text-sm font-black text-primary italic">{(c.points || 0).toLocaleString()} pts</span>
-                        </td>
-                        <td className="px-10 py-6">
-                          <button 
-                            onClick={() => setSelectedCustomer(c)}
-                            className="bg-slate-100 text-slate-600 text-[10px] font-black px-4 py-2 rounded-full border border-slate-200 hover:bg-primary hover:text-white hover:border-primary transition-all"
-                          >
-                            {cBookings.length} CITAS (VER HISTORIAL)
-                          </button>
-                        </td>
-                        <td className="px-10 py-6">
-                          <span className={`status-pill ${c.points > 5000 ? 'pill-green' : 'pill-pink'}`}>
-                            {c.points > 5000 ? 'Platinum' : 'Standard'}
-                          </span>
-                        </td>
-                        <td className="px-10 py-6">
-                          <p className="text-[10px] font-medium text-slate-500 italic">
-                            {cBookings[0] ? new Date(cBookings[0].date).toLocaleDateString() : 'Sin actividad'}
-                          </p>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            
-            <AnimatePresence>
-              {selectedCustomer && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-white rounded-[40px] max-w-2xl w-full p-10 shadow-2xl border border-pink-100 professional-shadow"
-                  >
-                    <div className="flex justify-between items-start mb-10">
-                      <div className="flex items-center gap-6">
-                        <div className="w-20 h-20 rounded-[24px] bg-pink-100 overflow-hidden border-4 border-white shadow-xl">
-                          <img src={selectedCustomer.photoURL || "https://i.pravatar.cc/150?u="+selectedCustomer.id} className="w-full h-full object-cover" />
-                        </div>
-                        <div>
-                          <h2 className="text-3xl font-black text-slate-800 font-h1 italic tracking-tight">{selectedCustomer.displayName}</h2>
-                          <div className="flex flex-wrap gap-4 mt-2">
-                            <p className="text-xs font-bold text-pink-400 uppercase tracking-widest">{selectedCustomer.email}</p>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">• {selectedCustomer.phone || 'Sin Teléfono'}</p>
-                          </div>
-                          {selectedCustomer.address && (
-                            <p className="items-center gap-1 text-[10px] text-slate-400 italic mt-2 flex">
-                              <MapPin size={10} /> {selectedCustomer.address}
-                            </p>
-                          )}
-                          {selectedCustomer.phone && (
-                            <a 
-                              href={`https://wa.me/${selectedCustomer.phone.replace(/\D/g, '')}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-4 flex items-center justify-center gap-2 px-6 py-3 bg-emerald-500 text-white rounded-[24px] text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-100"
-                            >
-                              <MessageSquare size={14} /> Contactar WhatsApp
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                      <button onClick={() => setSelectedCustomer(null)} className="p-4 bg-pink-50 text-slate-400 rounded-2xl hover:text-primary transition-colors">
-                        <Plus className="rotate-45" size={24} />
-                      </button>
-                    </div>
-
-                    <div className="space-y-6 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      <div className="border-b border-pink-50 pb-4 mb-6">
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Historial de Citas</h3>
-                        {getCustomerBookings(selectedCustomer.id).length === 0 ? (
-                          <p className="py-4 text-slate-400 italic text-xs">No hay historial de citas disponible.</p>
-                        ) : (
-                          getCustomerBookings(selectedCustomer.id).map((b, i) => (
-                            <div key={i} className="flex justify-between items-center p-6 bg-pink-50/20 rounded-[32px] border border-pink-50 mb-3">
-                              <div>
-                                <h4 className="font-black text-slate-800 text-lg font-h1 italic">{b.serviceName}</h4>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-2">
-                                  <Clock size={12} /> {new Date(b.date).toLocaleString()}
-                                </p>
-                              </div>
-                              <span className={`status-pill ${b.status === 'confirmed' ? 'pill-green' : 'pill-pink'}`}>
-                                {b.status === 'confirmed' ? 'Completado' : 'Pendiente'}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-
-                      <div>
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Historial de Compras</h3>
-                        {getCustomerOrders(selectedCustomer.id).length === 0 ? (
-                          <p className="py-4 text-slate-400 italic text-xs">No hay historial de compras disponible.</p>
-                        ) : (
-                          getCustomerOrders(selectedCustomer.id).map((o, i) => (
-                            <div key={i} className="flex justify-between items-center p-6 bg-slate-50 rounded-[32px] border border-slate-100 mb-3">
-                              <div>
-                                <h4 className="font-black text-slate-800 text-sm italic">{o.productName}</h4>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                                  {new Date(o.createdAt?.toDate()).toLocaleString()} • Cantidad: {o.quantity}
-                                </p>
-                              </div>
-                              <span className="text-sm font-black text-primary italic">${o.price}</span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                </div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-      )}
-
-      {(viewType === 'services' || viewType === 'products') && (
-        <div className="grid grid-cols-1 gap-14">
-          <div className="flex justify-between items-center px-4">
-            <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">
-              Catálogo de {viewType === 'services' ? 'Servicios' : 'Productos'} ({viewType === 'services' ? services.length : products.length})
-            </h3>
-            <button 
-              onClick={viewType === 'services' ? addService : addProduct}
-              className="flex items-center gap-3 text-[10px] font-black text-white bg-emerald-500 px-8 py-4 rounded-[24px] hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-100 scale-100 hover:scale-105 active:scale-95"
-            >
-              <Plus size={20} /> AGREGAR NUEVO
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-            {(viewType === 'services' ? services : products).map((item: any) => (
-              <div key={item.id} className="bg-white rounded-[40px] p-10 border border-pink-50 shadow-sm hover:shadow-2xl transition-all duration-500 group relative overflow-hidden professional-shadow">
-                <div className="absolute top-0 left-0 w-2 h-full bg-primary opacity-20 transition-opacity group-hover:opacity-100"></div>
-                <div className="flex justify-between items-start mb-8">
-                  <input 
-                    className="text-2xl font-black text-slate-800 font-h1 italic bg-transparent focus:bg-pink-50/30 px-3 py-1 rounded-xl outline-none w-[80%] transition-colors"
-                    value={item.name}
-                    onChange={(e) => updateItem(viewType, item.id, { name: e.target.value })}
-                  />
-                  <button onClick={() => setItemToDelete({ col: viewType, id: item.id })} className="p-3 text-slate-200 hover:text-red-500 transition-all hover:bg-red-50 rounded-2xl">
-                    <LogOut size={20} className="rotate-180" title="Eliminar" />
-                  </button>
-                </div>
-
-                <div className="mb-8 space-y-4">
-                  <div className="relative group/upload">
-                    <Paperclip className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-200" size={16} />
-                    <input 
-                      className="w-full bg-slate-50/50 rounded-2xl pl-12 pr-12 py-3 text-xs text-slate-500 font-medium italic border border-transparent focus:border-primary outline-none"
-                      value={item.image || ''}
-                      placeholder={viewType === 'products' ? 'URL de imagen de producto' : 'URL de imagen de servicio'}
-                      onChange={(e) => updateItem(viewType, item.id, { image: e.target.value })}
-                    />
-                    <label className="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer text-primary hover:scale-110 transition-transform">
-                      <Upload size={16} />
-                      <input 
-                        type="file" 
-                        className="hidden" 
-                        accept="image/*,video/*"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                             if (file.size > 800000) return alert("Archivo muy grande. Máximo 800KB para almacenamiento en DB.");
-                             const base64 = await fileToBase64(file);
-                             updateItem(viewType, item.id, { image: base64 });
-                          }
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <textarea 
-                    className="w-full bg-slate-50/50 rounded-[24px] p-6 text-sm text-slate-500 min-h-[100px] outline-none focus:ring-4 focus:ring-primary/5 italic leading-relaxed"
-                    value={item.description}
-                    onChange={(e) => updateItem(viewType, item.id, { description: e.target.value })}
-                    placeholder="Escribe la descripción aquí..."
-                  />
-                </div>
-
-                <div className={viewType === 'services' ? 'flex flex-col gap-6' : 'grid grid-cols-2 gap-6'}>
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-3 pl-1 italic">Precio ($)</label>
-                    <div className="relative">
-                      <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-200" size={16} />
-                      <input 
-                        type="number"
-                        className="w-full bg-pink-50/20 border border-pink-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-primary outline-none focus:border-primary transition-colors italic"
-                        value={item.price}
-                        onChange={(e) => updateItem(viewType, item.id, { price: parseFloat(e.target.value) || 0 })}
-                      />
-                    </div>
-                  </div>
-                  {viewType === 'products' && (
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-3 pl-1 italic">Stock</label>
-                      <div className="relative">
-                        <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-200" size={16} />
-                        <input 
-                          type="number"
-                          className="w-full bg-pink-50/20 border border-pink-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-slate-600 outline-none focus:border-primary transition-colors italic"
-                          value={item.stock}
-                          onChange={(e) => updateItem(viewType, item.id, { stock: parseInt(e.target.value) || 0 })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {viewType === 'products' && (
-                  <div className="mt-6">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-3 pl-1 italic">Umbral Stock Mínimo</label>
-                    <input 
-                      type="number"
-                      className="w-full bg-pink-50/20 border border-pink-100 rounded-2xl px-6 py-3 text-xs font-black text-red-400 outline-none focus:border-red-400 transition-colors italic"
-                      value={item.minStock || 5}
-                      onChange={(e) => updateItem(viewType, item.id, { minStock: parseInt(e.target.value) })}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
-            {(viewType === 'services' ? services : products).length === 0 && (
-               <div className="col-span-full py-20 text-center bg-slate-50 rounded-[40px] border-2 border-dashed border-slate-100">
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest italic">No hay registrados todavía</p>
-               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Global Deletion Modal */}
-      <AnimatePresence>
-        {itemToDelete && (
-          <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-xl">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[50px] p-12 max-w-md w-full text-center shadow-2xl border border-pink-100"
-            >
-              <div className="w-24 h-24 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-8 animate-pulse">
-                <LogOut size={40} className="rotate-180" />
-              </div>
-              <h3 className="text-3xl font-black text-slate-800 font-h1 italic mb-4">¿Estás seguro?</h3>
-              <p className="text-slate-500 italic mb-10 leading-relaxed">Esta acción es irreversible y eliminará permanentemente el registro de la plataforma.</p>
-              <div className="grid grid-cols-2 gap-4">
-                <button 
-                  onClick={() => setItemToDelete(null)}
-                  className="py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-slate-400 bg-slate-100 hover:bg-slate-200 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={removeItem}
-                  className="py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-white bg-red-500 hover:bg-red-600 shadow-xl shadow-red-100 transition-all"
-                >
-                  Sí, Eliminar
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
+// --- View Components ---
 // --- View Components ---
 
 const ServicesView = ({ setView }: { setView: (v: View) => void }) => {
@@ -1442,8 +716,14 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
   const [aiSuggestion, setAiSuggestion] = useState<any>(null);
   const [pinterestUrl, setPinterestUrl] = useState('');
   const [moodboard, setMoodboard] = useState<any[]>([]);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isModelLoading, setIsModelLoading] = useState(false);
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const handsRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -1455,6 +735,162 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
     }, (err) => handleFirestoreError(err, OperationType.GET, 'moodboards'));
     return unsub;
   }, [user]);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraRef.current) cameraRef.current.stop();
+      if (handsRef.current) handsRef.current.close();
+    };
+  }, []);
+
+  const onResults = (results: any) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // In a real-time overlay, we don't necessarily draw the video frame to the canvas
+    // because the video is underneath. We just draw the transparent overlay.
+    
+    if (results.multiHandLandmarks) {
+      for (const landmarks of results.multiHandLandmarks) {
+        // Find indices for nail tips: 4 (Thumb), 8 (Index), 12 (Middle), 16 (Ring), 20 (Pinky)
+        const nailIndices = [4, 8, 12, 16, 20];
+        
+        nailIndices.forEach((idx) => {
+          const point = landmarks[idx];
+          const x = point.x * canvas.width;
+          const y = point.y * canvas.height;
+          
+          // Estimate size and rotation based on neighbor joint
+          const neighbor = landmarks[idx - 1];
+          const dx = (point.x - neighbor.x) * canvas.width;
+          const dy = (point.y - neighbor.y) * canvas.height;
+          const angle = Math.atan2(dy, dx);
+          const size = Math.sqrt(dx*dx + dy*dy) * 0.8;
+
+          drawRealisticNail(ctx, x, y, size, angle);
+        });
+
+        // Debug: Draw connectors if needed
+        // drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#ffffff22', lineWidth: 1});
+      }
+    }
+    ctx.restore();
+  };
+
+  const drawRealisticNail = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, angle: number) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+
+    const nailColor = aiSuggestion?.colorPalette?.[0] || '#ec4899'; // Use AI color or default pink
+
+    // 1. SOFT SHADOW
+    ctx.shadowBlur = size * 0.2;
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+
+    // 2. NAIL SHAPE (Dynamic based on selected design)
+    ctx.beginPath();
+    // Simplified almond/oval shape
+    ctx.ellipse(0, 0, size * 1.2, size * 0.6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = nailColor;
+    ctx.fill();
+
+    // Reset shadow for further effects
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // 3. GLOSSY HIGHLIGHT (Realism)
+    const highlight = ctx.createLinearGradient(-size, -size, size, size);
+    highlight.addColorStop(0, 'rgba(255,255,255,0.6)');
+    highlight.addColorStop(0.5, 'rgba(255,255,255,0)');
+    highlight.addColorStop(1, 'rgba(255,255,255,0.1)');
+    
+    ctx.beginPath();
+    ctx.ellipse(-size * 0.3, -size * 0.2, size * 0.6, size * 0.2, Math.PI / 4, 0, Math.PI * 2);
+    ctx.fillStyle = highlight;
+    ctx.fill();
+
+    // 4. TEXTURE / DEPTH
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath();
+    ctx.ellipse(size * 0.4, 0, size * 0.5, size * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    let hands: any = null;
+    let camera: any = null;
+
+    const setupCamera = async () => {
+      if (isCameraActive && videoRef.current) {
+        setIsModelLoading(true);
+        try {
+          hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+          });
+
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+
+          hands.onResults(onResults);
+          handsRef.current = hands;
+
+          camera = new MPCamera(videoRef.current, {
+            onFrame: async () => {
+              if (handsRef.current && videoRef.current) {
+                await handsRef.current.send({image: videoRef.current});
+              }
+            },
+            width: 640,
+            height: 480
+          });
+          
+          await camera.start();
+          cameraRef.current = camera;
+        } catch (err) {
+          console.error("Camera error:", err);
+          setIsCameraActive(false);
+        } finally {
+          setIsModelLoading(false);
+        }
+      }
+    };
+
+    if (isCameraActive) {
+      setupCamera();
+    }
+
+    return () => {
+      if (camera) camera.stop();
+      if (hands) hands.close();
+    };
+  }, [isCameraActive]);
+
+  const startCamera = async () => {
+    setIsCameraActive(true);
+  };
+
+  const stopCamera = () => {
+    setIsCameraActive(false);
+    if (cameraRef.current) cameraRef.current.stop();
+    if (handsRef.current) handsRef.current.close();
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1468,8 +904,8 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
     if (!musePrompt) return;
     setIsGenerating(true);
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+      const response = await (ai as any).models.generateContent({
+        model: 'gemini-1.5-flash',
         contents: `Eres un diseñador de uñas experto de lujo. Basado en esta solicitud: "${musePrompt}", genera un concepto de diseño exclusivo. 
         Devuelve un JSON con:
         - name: Nombre creativo del diseño
@@ -1480,7 +916,29 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
         config: { responseMimeType: 'application/json' }
       });
       
-      const data = JSON.parse(response.text || '{}');
+      const text = response.text || '';
+      const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      let data = {};
+      try {
+        const textToParse = typeof cleanText === 'string' ? cleanText : JSON.stringify(cleanText);
+        if (textToParse && textToParse !== 'undefined' && textToParse !== 'null' && textToParse.trim() !== '') {
+          data = JSON.parse(textToParse);
+        }
+      } catch (parseError) {
+        console.error('Error parsing AI response:', parseError);
+        // Try to extract JSON if it was buried in text
+        const textToMatch = typeof cleanText === 'string' ? cleanText : '';
+        const jsonMatch = textToMatch.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            data = JSON.parse(jsonMatch[0]);
+          } catch (innerError) {
+            console.error('Final attempt to parse AI response failed:', innerError);
+          }
+        }
+      }
+      
       setAiSuggestion(data);
       
       // In a real scenario, we'd use the promptForImage to call an image generation API.
@@ -1545,7 +1003,31 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
           >
             <div className="lg:col-span-8 flex flex-col gap-8">
               <div className="relative aspect-video bg-slate-900 rounded-[60px] overflow-hidden border-[10px] border-white shadow-2xl professional-shadow flex items-center justify-center group">
-                {handImage ? (
+                {isCameraActive ? (
+                  <div className="relative w-full h-full">
+                    <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline autoPlay muted />
+                    <canvas 
+                      ref={canvasRef} 
+                      className="absolute inset-0 w-full h-full object-cover z-10" 
+                      width={640} 
+                      height={480} 
+                    />
+                    {isModelLoading && (
+                      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-md flex items-center justify-center z-20">
+                         <div className="text-center space-y-4">
+                            <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
+                               <Sparkles size={40} className="text-primary" />
+                            </motion.div>
+                            <p className="text-xs font-black text-white uppercase tracking-widest">Iniciando IA Visual...</p>
+                         </div>
+                      </div>
+                    )}
+
+                    <div className="absolute bottom-8 left-8 z-30 flex items-center gap-4">
+                       <button onClick={stopCamera} className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest hover:bg-red-500 transition-all">Detener Cámara</button>
+                    </div>
+                  </div>
+                ) : handImage ? (
                   <div className="relative w-full h-full">
                     <img src={handImage} className="w-full h-full object-cover" alt="Hand" />
                     {selectedDesign && (
@@ -1571,17 +1053,32 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
                   </div>
                 ) : (
                   <div className="text-center p-20 space-y-8">
-                    <div className="w-24 h-24 bg-white/10 rounded-[35%] flex items-center justify-center mx-auto mb-6">
-                      <Camera size={40} className="text-primary" />
+                    <div className="flex gap-4 justify-center">
+                      <div className="w-24 h-24 bg-white/10 rounded-[35%] flex items-center justify-center border border-white/10">
+                        <Camera size={40} className="text-primary" />
+                      </div>
+                      <div className="w-24 h-24 bg-primary/10 rounded-[35%] flex items-center justify-center border border-primary/20">
+                        <Zap size={40} className="text-primary" />
+                      </div>
                     </div>
-                    <h3 className="text-2xl font-black text-white font-h1 italic">Sube tu Foto</h3>
-                    <p className="text-slate-400 max-w-sm italic">Para una mejor experiencia, toma la foto con buena luz y tu mano relajada sobre una superficie plana.</p>
-                    <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="btn-primary py-5 px-10 text-[10px] uppercase tracking-widest shadow-2xl shadow-primary/20"
-                    >
-                      Seleccionar Archivo
-                    </button>
+                    <div>
+                      <h3 className="text-3xl font-black text-white font-h1 italic">Prueba en Tiempo Real</h3>
+                      <p className="text-slate-400 max-w-sm italic mx-auto mt-2">Visualiza el diseño directamente en tus manos usando Realidad Aumentada.</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                      <button 
+                        onClick={startCamera}
+                        className="btn-primary py-5 px-10 text-[10px] uppercase tracking-widest shadow-2xl shadow-primary/20 flex items-center gap-2"
+                      >
+                        <Camera size={18} /> USAR CÁMARA EN VIVO
+                      </button>
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-white/10 backdrop-blur-md text-white py-5 px-10 rounded-[28px] text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all"
+                      >
+                        SUBIR FOTO
+                      </button>
+                    </div>
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*" />
                   </div>
                 )}
@@ -2105,11 +1602,28 @@ const GridView = () => {
   );
 };
 
-const ShopView = ({ setView, cart, setCart }: { setView: (v: View) => void, cart: any[], setCart: any }) => {
+const ShopView = ({ setView }: { setView: (v: View) => void }) => {
   const [products, setProducts] = useState<any[]>([]);
   const { isAdmin, user } = useAuth();
+  const addItem = useCartStore(state => state.addItem);
+  const openDrawer = useCartStore(state => state.openDrawer);
+  const [addedFeedback, setAddedFeedback] = useState<string | null>(null);
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+
+  const handleAddToCart = (product: any) => {
+    if (product.stock <= 0) return;
+    addItem({
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      imageUrl: product.image || product.imageUrl,
+      stock: product.stock
+    });
+    setAddedFeedback(product.id);
+    setTimeout(() => setAddedFeedback(null), 2000);
+    openDrawer();
+  };
 
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
@@ -2118,35 +1632,6 @@ const ShopView = ({ setView, cart, setCart }: { setView: (v: View) => void, cart
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'products'));
     return unsubscribe;
   }, []);
-
-  const addToCart = (product: any) => {
-    if (product.stock <= 0) return;
-    setCart((prev: any[]) => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
-      }
-      return [...prev, { ...product, quantity: 1 }];
-    });
-    // Visual feedback could be added here
-  };
-
-  const removeFromCart = (productId: string) => {
-    setCart((prev: any[]) => prev.filter(item => item.id !== productId));
-  };
-
-  const updateCartQuantity = (productId: string, delta: number) => {
-    setCart((prev: any[]) => prev.map(item => {
-      if (item.id === productId) {
-        const newQty = Math.max(1, Math.min(item.stock, item.quantity + delta));
-        return { ...item, quantity: newQty };
-      }
-      return item;
-    }));
-  };
-
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const cartItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const updateProductImage = async (id: string, newUrl: string) => {
     try {
@@ -2300,11 +1785,20 @@ const ShopView = ({ setView, cart, setCart }: { setView: (v: View) => void, cart
                   </div>
                   <button 
                     disabled={selectedProduct.stock <= 0}
-                    onClick={() => { addToCart(selectedProduct); setSelectedProduct(null); }}
-                    className="btn-primary w-full py-6 flex items-center justify-center gap-4 text-xs shadow-xl shadow-pink-100 disabled:opacity-50"
+                    onClick={() => { handleAddToCart(selectedProduct); }}
+                    className="btn-primary w-full py-6 flex items-center justify-center gap-4 text-xs shadow-xl shadow-pink-100 disabled:opacity-50 transition-all"
                   >
-                    <ShoppingCart size={20} />
-                    {selectedProduct.stock > 0 ? 'Añadir al Carrito' : 'Agotado'}
+                    {addedFeedback === selectedProduct.id ? (
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="flex items-center gap-3">
+                         <CheckCircle2 size={20} />
+                         ¡Añadido al Carrito!
+                      </motion.div>
+                    ) : (
+                      <>
+                        <ShoppingCart size={20} />
+                        {selectedProduct.stock > 0 ? 'Añadir al Carrito' : 'Agotado'}
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -2327,118 +1821,11 @@ const ShopView = ({ setView, cart, setCart }: { setView: (v: View) => void, cart
             </div>
           ) : (
             products.map(p => (
-              <motion.article 
-                key={p.id} 
-                whileHover={{ y: -10 }}
-                onClick={() => setSelectedProduct(p)} 
-                className="bg-white rounded-[40px] overflow-hidden shadow-sm border border-pink-50 flex flex-col group h-full hover:shadow-2xl transition-all duration-500 cursor-pointer"
-              >
-                <div className="aspect-[4/3] bg-pink-50/20 overflow-hidden relative">
-                  <img 
-                    src={p.image || 'https://images.unsplash.com/photo-1634712282287-14ed57b9cc89?q=80&w=400&auto=format&fit=crop'} 
-                    alt={p.name} 
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" 
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                  />
-                  <div className="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-4 py-2 rounded-2xl shadow-xl">
-                    <span className="text-lg font-black text-primary font-h1 italic">${p.price?.toFixed(2)}</span>
-                  </div>
-                </div>
-                <div className="p-10 flex flex-col flex-1">
-                  <h3 className="text-lg font-black text-slate-800 mb-4 line-clamp-2 leading-tight">{p.name}</h3>
-                  <p className="text-sm text-slate-500 mb-10 flex-1 line-clamp-3 leading-relaxed italic">{p.description}</p>
-                  <div className="flex items-center justify-between gap-4">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); addToCart(p); }}
-                      disabled={p.stock <= 0}
-                      className="flex-1 btn-primary py-4 flex items-center justify-center gap-3 text-xs disabled:opacity-50"
-                    >
-                      <ShoppingCart size={18} />
-                      {p.stock > 0 ? 'Añadir' : 'Agotado'}
-                    </button>
-                    <div className="text-right">
-                      <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Disponibles</p>
-                      <p className="text-sm font-black text-slate-600">{p.stock || 0}</p>
-                    </div>
-                  </div>
-                </div>
-              </motion.article>
+              <ProductCard key={p.id} product={p} onSelect={setSelectedProduct} />
             ))
           )}
         </div>
       </div>
-
-      <aside className="w-full lg:w-96 lg:shrink-0 lg:sticky lg:top-32">
-        <div className="bg-white rounded-[40px] border border-pink-100 shadow-2xl flex flex-col p-10 professional-shadow">
-          <div className="flex justify-between items-center mb-10">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-pink-50 rounded-2xl flex items-center justify-center text-primary">
-                <ShoppingBag size={20} />
-              </div>
-              <h2 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Resumen</h2>
-            </div>
-            <span className="bg-primary text-white text-[10px] font-black px-4 py-2 rounded-full shadow-lg shadow-pink-200">{cartItemsCount} {cartItemsCount === 1 ? 'ITEM' : 'ITEMS'}</span>
-          </div>
-          
-          <div className="space-y-6 mb-12 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-            {cart.length === 0 ? (
-              <div className="py-10 text-center">
-                <ShoppingCart size={32} className="mx-auto text-pink-100 mb-4" />
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Tu carrito está vacío</p>
-              </div>
-            ) : (
-              cart.map(item => (
-                <div key={item.id} className="flex gap-5 p-4 bg-pink-50/20 rounded-3xl border border-pink-100/50 group relative">
-                  <div className="w-16 h-16 bg-white rounded-2xl overflow-hidden shrink-0 shadow-sm border border-pink-50">
-                    <img src={item.image} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
-                  </div>
-                  <div className="flex-1 flex flex-col justify-center">
-                    <div className="flex justify-between items-start">
-                      <p className="font-bold text-slate-800 text-sm leading-tight mb-1 line-clamp-1">{item.name}</p>
-                      <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-400 transition-colors">
-                        <Plus size={14} className="rotate-45" />
-                      </button>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <p className="font-black text-primary italic">${item.price?.toFixed(2)}</p>
-                      <div className="flex items-center gap-3 bg-white px-2 py-1 rounded-xl shadow-sm border border-pink-50">
-                        <button onClick={() => updateCartQuantity(item.id, -1)} className="text-slate-400 hover:text-primary"><Plus size={10} className="rotate-45" /></button>
-                        <span className="text-[10px] font-black text-slate-800">{item.quantity}</span>
-                        <button onClick={() => updateCartQuantity(item.id, 1)} className="text-slate-400 hover:text-primary"><Plus size={10} /></button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="border-t border-pink-100 pt-8 mb-10 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Subtotal</span>
-              <span className="font-black text-slate-800">${cartTotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Envío</span>
-              <span className="text-emerald-500 font-black text-[10px] uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full">{cartTotal > 100 ? 'Gratis' : '$10.00'}</span>
-            </div>
-            <div className="flex justify-between items-center border-t border-pink-50 pt-5 mt-5">
-              <span className="text-slate-900 font-black uppercase tracking-widest text-xs">Total</span>
-              <span className="text-3xl font-black text-primary italic font-h1">${(cartTotal + (cartTotal > 100 ? 0 : (cart.length > 0 ? 10 : 0))).toFixed(2)}</span>
-            </div>
-          </div>
-
-          <button 
-            disabled={cart.length === 0}
-            onClick={() => setView('checkout')} 
-            className="btn-primary w-full py-5 flex items-center justify-center gap-3 group text-xs shadow-xl shadow-pink-100 disabled:opacity-50"
-          >
-            Finalizar Compra
-            <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
-          </button>
-        </div>
-      </aside>
     </div>
   );
 };
@@ -2450,7 +1837,13 @@ const BookingView = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [notes, setNotes] = useState('');
+  const [paymentReady, setPaymentReady] = useState(false);
+  const [bookingReference, setBookingReference] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
   const { user } = useAuth();
+  
+  // Wompi requires amounts in cents
+  const amountInCents = selectedService?.price ? Math.floor(selectedService.price * 100) : 0;
 
   useEffect(() => {
     const sQuery = query(collection(db, 'services'));
@@ -2468,8 +1861,12 @@ const BookingView = () => {
     return () => { unsubS(); unsubA(); };
   }, []);
 
-  const handleBooking = async () => {
+  const prepareBooking = async () => {
     if (!selectedService || !selectedDate || !selectedTime) return;
+    setIsProcessing(true);
+    const reference = `YP-${Date.now()}-${user?.uid?.slice(0, 6) || 'guest'}`;
+    setBookingReference(reference);
+
     try {
       await addDoc(collection(db, 'bookings'), {
         userId: user?.uid,
@@ -2478,22 +1875,58 @@ const BookingView = () => {
         date: `${selectedDate} ${selectedTime}`,
         status: 'pending',
         notes: notes,
+        paymentReference: reference,
         createdAt: serverTimestamp()
       });
-      alert('Cita reservada con éxito. Te avisaremos cuando sea confirmada.');
-      setSelectedService(null);
-      setSelectedDate('');
-      setSelectedTime('');
-      setNotes('');
+      setPaymentReady(true);
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, 'bookings');
+    } finally {
+      setIsProcessing(false);
     }
+  };
+
+  const handlePaymentSuccess = () => {
+    alert('¡Cita reservada y pagada con éxito! Recibirás los detalles por correo.');
+    setSelectedService(null);
+    setSelectedDate('');
+    setSelectedTime('');
+    setNotes('');
+    setPaymentReady(false);
+  };
+
+  const handlePaymentError = () => {
+    alert('Hubo un problema procesando el pago. Puedes intentarlo nuevamente desde el historial de citas o elegir otra.');
   };
 
   const getAvailableSlots = () => {
     const day = availability.find(a => a.date === selectedDate);
     return day ? day.slots : [];
   };
+
+  if (paymentReady) {
+     return (
+       <div className="max-w-3xl mx-auto py-20 px-6">
+         <div className="bg-white p-12 rounded-[50px] border border-pink-50 shadow-2xl professional-shadow text-center">
+            <h2 className="text-3xl font-black text-slate-800 mb-4 font-h1 italic">Asegura tu Espacio</h2>
+            <p className="text-slate-500 font-medium italic mb-10">Para confirmar tu cita de {selectedService.name} el {selectedDate} a las {selectedTime}, realiza el pago seguro a continuación de {formatCurrency(selectedService.price)}.</p>
+            
+            <div className="max-w-md mx-auto">
+               <WompiCheckout 
+                   amount={amountInCents} 
+                   reference={bookingReference} 
+                   email={user?.email || undefined} 
+                   onSuccess={handlePaymentSuccess} 
+                   onError={handlePaymentError} 
+               />
+               <button onClick={() => setPaymentReady(false)} className="mt-8 text-[10px] uppercase font-bold text-slate-400 hover:text-primary transition-colors tracking-widest tracking-widest">
+                  Cancelar o volver atrás
+               </button>
+            </div>
+         </div>
+       </div>
+     );
+  }
 
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-14 py-10">
@@ -2626,10 +2059,15 @@ const BookingView = () => {
               </div>
               <button 
                 disabled={!selectedService || !selectedDate || !selectedTime}
-                onClick={handleBooking}
+                onClick={prepareBooking}
                 className="w-full md:w-auto btn-primary px-16 py-6 uppercase tracking-[0.2em] text-xs shadow-2xl shadow-pink-100 disabled:opacity-30 disabled:cursor-not-allowed group"
               >
-                Confirmar ahora <ChevronRight size={18} className="inline ml-2 group-hover:translate-x-1 transition-transform" />
+                {isProcessing ? 'Procesando...' : (
+                   <>
+                     Reservar y Pagar
+                     <ChevronRight size={18} className="inline ml-2 group-hover:translate-x-1 transition-transform" />
+                   </>
+                )}
               </button>
             </div>
           </div>
@@ -3111,169 +2549,7 @@ const HelpCenterView = () => (
   </div>
 );
 
-const CheckoutView = ({ cart, setCart, setView }: { cart: any[], setCart: (c: any[]) => void, setView: (v: View) => void }) => {
-  const { user } = useAuth();
-  const [isProcessing, setIsProcessing] = useState(false);
-  
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const shipping = subtotal > 100 ? 0 : (cart.length > 0 ? 10 : 0);
-  const total = subtotal + shipping;
-
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-    setIsProcessing(true);
-    
-    try {
-      const batch = writeBatch(db);
-      
-      // Create Order
-      const orderRef = doc(collection(db, 'orders'));
-      batch.set(orderRef, {
-        userId: user?.uid,
-        items: cart,
-        subtotal,
-        shipping,
-        total,
-        status: 'pending',
-        createdAt: serverTimestamp()
-      });
-
-      // Update Stock
-      for (const item of cart) {
-        const productRef = doc(db, 'products', item.id);
-        batch.update(productRef, {
-          stock: increment(-item.quantity)
-        });
-      }
-
-      await batch.commit();
-      
-      setCart([]);
-      alert('¡Compra realizada con éxito! Recibirás los detalles por correo.');
-      setView('landing');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'checkout/transaction');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 py-12">
-      <div className="space-y-10">
-        <section>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-8 h-8 bg-pink-900 text-white flex items-center justify-center rounded-full text-[10px] font-black shadow-lg">1</div>
-            <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em] font-h1 italic">Datos de Envío</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-8">
-            <div className="flex flex-col gap-3">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Nombre Completo</label>
-              <input className="bg-pink-50/20 border border-pink-100 rounded-2xl h-14 px-6 text-xs focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium" placeholder="Tu nombre" />
-            </div>
-            <div className="flex flex-col gap-3">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Teléfono</label>
-              <input className="bg-pink-50/20 border border-pink-100 rounded-2xl h-14 px-6 text-xs focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium" placeholder="+57 ..." />
-            </div>
-            <div className="flex flex-col gap-3 col-span-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Dirección de Entrega</label>
-              <input className="bg-pink-50/20 border border-pink-100 rounded-2xl h-14 px-6 text-xs focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium" placeholder="Calle, ciudad, barrio..." />
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-8 h-8 bg-pink-900 text-white flex items-center justify-center rounded-full text-[10px] font-black shadow-lg">2</div>
-            <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em] font-h1 italic">Método de Pago</h2>
-          </div>
-          <div className="space-y-5">
-            <div className="p-8 bg-white border-2 border-primary rounded-[32px] flex items-center justify-between shadow-xl shadow-pink-100 professional-shadow">
-              <div className="flex items-center gap-5">
-                <div className="w-10 h-10 bg-primary rounded-2xl flex items-center justify-center text-white shadow-lg"><CreditCard size={20} /></div>
-                <div>
-                  <div className="text-xs font-black text-slate-800 uppercase tracking-widest">Tarjeta Guardada</div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Visa •••• 4242</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black text-primary italic">ACTIVO</span>
-                <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"><CheckCircle2 size={14} /></div>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <aside className="bg-pink-900 rounded-[50px] p-12 text-white shadow-2xl relative overflow-hidden flex flex-col border border-pink-800 professional-shadow min-h-[600px]">
-        <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-pink-500 opacity-20 rounded-full blur-[100px] pointer-events-none"></div>
-        <div className="absolute -right-20 -top-20 w-80 h-80 bg-pink-400 opacity-10 rounded-full blur-[100px] pointer-events-none"></div>
-        
-        <h2 className="text-3xl font-black mb-12 tracking-tight font-h1 italic relative z-10 border-b border-white/10 pb-6">Tu Pedido</h2>
-        
-        <div className="space-y-6 flex-1 overflow-y-auto pr-4 custom-scrollbar relative z-10 mb-10">
-          {cart.map(item => (
-            <div key={item.id} className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/10">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-white rounded-xl overflow-hidden shrink-0">
-                  <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold leading-tight">{item.name}</p>
-                  <p className="text-[10px] text-pink-300 font-medium italic mt-1">{item.quantity} unidades • ${item.price}</p>
-                </div>
-              </div>
-              <span className="text-sm font-black font-h1 italic">${(item.price * item.quantity).toFixed(2)}</span>
-            </div>
-          ))}
-          {cart.length === 0 && (
-            <div className="text-center py-20 opacity-40">
-              <ShoppingCart size={48} className="mx-auto mb-4" />
-              <p className="text-[10px] font-black uppercase tracking-widest">Carrito Vacío</p>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-6 relative z-10 bg-white/5 p-8 rounded-3xl border border-white/10">
-          <div className="flex justify-between items-center text-pink-200 text-[10px] font-black uppercase tracking-[0.2em]">
-            <span>Productos</span>
-            <span className="text-white text-lg">${subtotal.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between items-center text-pink-200 text-[10px] font-black uppercase tracking-[0.2em]">
-            <span>Envío Premium</span>
-            <span className={shipping === 0 ? "text-emerald-400 text-lg" : "text-white text-lg"}>
-              {shipping === 0 ? 'GRATIS' : `$${shipping.toFixed(2)}`}
-            </span>
-          </div>
-          <div className="border-t border-white/20 pt-6 mt-6 flex justify-between items-end">
-            <div>
-              <span className="text-[10px] text-pink-200 font-bold uppercase tracking-[0.2em] mb-2 block">Total Final</span>
-              <span className="text-2xl font-black text-pink-200 line-through opacity-50 mr-3 italic">${(total * 1.2).toFixed(2)}</span>
-            </div>
-            <span className="text-6xl font-black text-white italic font-h1 leading-none">${total.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <button 
-          onClick={handleCheckout}
-          disabled={isProcessing || cart.length === 0}
-          className="mt-12 w-full h-20 bg-white text-pink-900 font-black text-sm uppercase tracking-[0.3em] rounded-[28px] hover:bg-emerald-500 hover:text-white transition-all active:scale-95 shadow-2xl relative z-10 group disabled:opacity-50 flex items-center justify-center gap-4 overflow-hidden"
-        >
-          {isProcessing ? (
-            <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-              <Sparkles size={24} />
-            </motion.div>
-          ) : (
-            <>
-              Confirmar & Pagar
-              <ChevronRight size={20} className="group-hover:translate-x-2 transition-transform" />
-            </>
-          )}
-        </button>
-      </aside>
-    </div>
-  );
-};
+const CheckoutView = null; // Removed redundant component
 
 // --- Main App ---
 
@@ -3281,22 +2557,20 @@ export default function App() {
   const { user, profile, loading, isAdmin } = useAuth();
   const [view, setView] = useState<View>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('yulied_view');
-      if (saved) return saved as View;
+      try {
+        const saved = localStorage.getItem('yulied_view');
+        if (saved && saved !== 'undefined' && saved !== 'null' && saved !== '""') {
+          return saved as View;
+        }
+      } catch (e) {
+        console.warn("Could not load saved view:", e);
+      }
     }
     return 'landing';
   });
 
-  const [cart, setCart] = useState<any[]>(() => {
-    const saved = localStorage.getItem('yulied_cart');
-    return saved ? JSON.parse(saved) : [];
-  });
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('yulied_cart', JSON.stringify(cart));
-  }, [cart]);
 
   // Listen for new products or promos to simulate push notifications
   useEffect(() => {
@@ -3319,7 +2593,9 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    localStorage.setItem('yulied_view', view);
+    if (view && view !== 'undefined' && (view as string) !== 'null') {
+      localStorage.setItem('yulied_view', view);
+    }
   }, [view]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -3383,13 +2659,14 @@ export default function App() {
       case 'services_list': return <ServicesView setView={setView} />;
       case 'ai_studio': return <AIStudioView setView={setView} />;
       case 'grid': return <GridView />;
-      case 'shop': return <ShopView setView={setView} cart={cart} setCart={setCart} />;
+      case 'shop': return <ShopView setView={setView} />;
       case 'booking': return <BookingView />;
       case 'loyalty': return <LoyaltyView />;
       case 'settings': return <SettingsView />;
       case 'messaging': return <MessagingView />;
       case 'help': return <HelpCenterView />;
-      case 'checkout': return <CheckoutView cart={cart} setCart={setCart} setView={setView} />;
+      case 'checkout': return <Checkout setView={setView} onPaymentSuccess={(orderId) => { window.location.hash = `#order-confirmada-${orderId}`; setView('order_confirmada'); }} />;
+      case 'order_confirmada': return <OrderConfirmada orderId={window.location.hash.split('-').pop() || ''} setView={setView} />;
       case 'admin': return isAdmin ? <AdminView /> : <LandingView setView={setView} />;
       default: return <LandingView setView={setView} />;
     }
@@ -3406,7 +2683,9 @@ export default function App() {
           notifications={notifications}
           showNotifications={showNotifications}
           setShowNotifications={setShowNotifications}
+          setView={setView}
         />
+        <CartDrawer onNavigateCheckout={() => setView('checkout')} />
         
         <main className="flex-1 p-6 md:p-10 lg:p-14 max-w-7xl mx-auto w-full">
           <AnimatePresence mode="wait">
@@ -3444,7 +2723,7 @@ export default function App() {
               exit={{ x: -300 }}
               className="fixed inset-0 z-[60] bg-white w-72 md:hidden shadow-2xl"
             >
-              <Sidebar activeView={view} setView={(v) => { setView(v); setIsSidebarOpen(false); }} />
+              <Sidebar activeView={view} setView={(v) => { setView(v); setIsSidebarOpen(false); }} isMobile={true} />
             </motion.div>
           </>
         )}

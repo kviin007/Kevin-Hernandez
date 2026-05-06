@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Oops! Estás desconectado - YuliedPlay</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', system-ui, sans-serif;
+      background-color: #fdf2f8; /* pink-50 */
+      color: #1e293b; /* slate-800 */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .container {
+      max-width: 400px;
+      padding: 40px;
+      background: white;
+      border-radius: 40px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      border: 1px solid #fce7f3; /* pink-100 */
+    }
+    .logo {
+      font-size: 2rem;
+      font-weight: 900;
+      color: #e91e8c;
+      font-style: italic;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 900;
+      margin-bottom: 10px;
+    }
+    p {
+      color: #64748b; /* slate-500 */
+      margin-bottom: 30px;
+      line-height: 1.5;
+    }
+    button {
+      background-color: #e91e8c;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 24px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #db2777;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">YuliedPlay</div>
+    <h1>Sin conexión</h1>
+    <p>Parece que no tienes internet en este momento. Verifica tu conexión y vuelve a intentarlo para seguir disfrutando de nuestros servicios de uñas.</p>
+    <button onclick="window.location.reload()">Reintentar conexión</button>
+  </div>
+</body>
+</html>

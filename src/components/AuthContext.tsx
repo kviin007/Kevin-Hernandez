@@ -90,7 +90,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const resetPassword = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch(err: any) {
+      if (err.code === 'auth/user-not-found') throw new Error('No existe una cuenta con este correo.');
+      if (err.code === 'auth/invalid-email') throw new Error('Correo electrónico inválido.');
+      throw new Error('Ocurrió un error al enviar el enlace. Inténtalo de nuevo.');
+    }
   };
 
   const login = async (emailInput: string, pass: string) => {
@@ -115,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           displayName: 'Administrador Master'
         };
         await setDoc(doc(db, 'users', res.user.uid), adminData, { merge: true });
-        await setDoc(doc(db, 'admins', res.user.uid), { active: true, email: email, level: 'superadmin' });
+        // NOTE: we removed write to admins collection from here as rules deny it
       }
     } catch (err: any) {
       if (emailInput.toLowerCase() === 'admin' && pass === 'admin' && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential')) {
@@ -131,12 +137,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             createdAt: serverTimestamp()
           };
           await setDoc(doc(db, 'users', res.user.uid), adminProfile);
-          await setDoc(doc(db, 'admins', res.user.uid), { active: true, email: email });
         } catch (createErr: any) {
-           throw err;
+           throw new Error('Error al inicializar admin: ' + createErr.message);
         }
       } else {
-        throw err;
+        if (err.code === 'auth/invalid-credential') throw new Error('Correo o contraseña incorrectos.');
+        if (err.code === 'auth/user-not-found') throw new Error('No existe una cuenta con este correo.');
+        if (err.code === 'auth/wrong-password') throw new Error('Contraseña incorrecta.');
+        throw new Error('Ocurrió un error al iniciar sesión. Inténtalo de nuevo.');
       }
     }
   };
@@ -144,21 +152,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signup = async (email: string, pass: string, extraData: { displayName: string, phone: string, address: string }) => {
     if (!email.includes('@')) throw new Error('Correo electrónico inválido.');
     if (pass.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres.');
-    const res = await createUserWithEmailAndPassword(auth, email, pass);
-    await setDoc(doc(db, 'users', res.user.uid), {
-      email,
-      displayName: extraData.displayName,
-      phone: extraData.phone,
-      address: extraData.address,
-      role: 'user',
-      points: 0,
-      createdAt: serverTimestamp()
-    });
+    try {
+      const res = await createUserWithEmailAndPassword(auth, email, pass);
+      await setDoc(doc(db, 'users', res.user.uid), {
+        email,
+        displayName: extraData.displayName,
+        phone: extraData.phone,
+        address: extraData.address,
+        role: 'user',
+        points: 0,
+        createdAt: serverTimestamp()
+      });
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') throw new Error('Este correo ya está registrado.');
+      throw new Error('Ocurrió un error al registrarse. Inténtalo de nuevo.');
+    }
   };
 
   const updatePasswordDirectly = async (newPass: string) => {
     if (!auth.currentUser) throw new Error("No hay usuario autenticado.");
-    await updatePassword(auth.currentUser, newPass);
+    try {
+      await updatePassword(auth.currentUser, newPass);
+    } catch (err: any) {
+      if (err.code === 'auth/requires-recent-login') throw new Error('Por seguridad, debes cerrar sesión y volver a entrar antes de cambiar tu contraseña.');
+      throw new Error('Error al actualizar contraseña.');
+    }
   };
 
   return (
@@ -180,6 +198,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useAuth = () => {
+  console.log('useAuth called, useContext is:', useContext);
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');

@@ -1,0 +1,1 @@
+export { wompiWebhook } from "./wompiWebhook";
