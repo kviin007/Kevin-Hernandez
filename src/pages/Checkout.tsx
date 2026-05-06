@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useCartStore, selectSubtotal, selectDiscountAmount, selectTotal } from '../stores/cartStore';
-import { ArrowLeft, MapPin, Truck, Store, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, MapPin, Truck, Store, ShieldCheck, Star } from 'lucide-react';
 import { formatCurrency } from '../utils/format';
 import { WompiCheckout } from '../components/checkout/WompiCheckout'; // Verify path
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../components/AuthContext';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 export const Checkout = ({ setView, onPaymentSuccess }: { setView: (v: string) => void, onPaymentSuccess: (orderId: string) => void }) => {
   const { user } = useAuth();
-  const { items, clearCart } = useCartStore();
+  const { items, clearCart, pointsToRedeem } = useCartStore();
   
   const subtotal = useCartStore(selectSubtotal);
   const discountAmount = useCartStore(selectDiscountAmount);
@@ -35,7 +36,16 @@ export const Checkout = ({ setView, onPaymentSuccess }: { setView: (v: string) =
   const handleWompiSuccess = async (txInfo: any) => {
     setIsProcessing(true);
     try {
-      const orderRef = await addDoc(collection(db, 'orders'), {
+      const orderRef = doc(collection(db, 'orders'));
+      
+      // Deduct points first
+      if (pointsToRedeem > 0) {
+        const functions = getFunctions();
+        const redeemPointsFn = httpsCallable(functions, 'redeemPoints');
+        await redeemPointsFn({ pointsToRedeem, orderId: orderRef.id });
+      }
+
+      await setDoc(orderRef, {
         userId: user?.uid || 'guest',
         items: items.map(item => ({
           productId: item.id,
@@ -47,6 +57,7 @@ export const Checkout = ({ setView, onPaymentSuccess }: { setView: (v: string) =
         total,
         subtotal,
         discount: discountAmount,
+        pointsRedeemed: pointsToRedeem,
         deliveryMethod,
         address: deliveryMethod === 'delivery' ? address : null,
         phone,
@@ -226,6 +237,16 @@ export const Checkout = ({ setView, onPaymentSuccess }: { setView: (v: string) =
                   <span>-{formatCurrency(discountAmount)}</span>
                 </div>
               )}
+
+              {pointsToRedeem > 0 && (
+                <div className="flex justify-between items-center text-orange-400">
+                  <span className="text-sm uppercase tracking-widest font-bold flex items-center gap-2">
+                    <Star size={16} />
+                    Puntos (-{pointsToRedeem})
+                  </span>
+                  <span>-{formatCurrency((pointsToRedeem / 100) * 1000)}</span>
+                </div>
+              )}
               
               <div className="flex justify-between items-center text-slate-400">
                 <span className="text-sm uppercase tracking-widest font-bold">Envío</span>
@@ -254,6 +275,14 @@ export const Checkout = ({ setView, onPaymentSuccess }: { setView: (v: string) =
                   className="w-full py-5 rounded-2xl font-black text-lg text-slate-400 bg-slate-800 cursor-not-allowed border border-slate-700 uppercase tracking-widest"
                 >
                   Completa tus datos
+                </button>
+              ) : total === 0 ? (
+                <button 
+                  onClick={() => handleWompiSuccess({ id: 'PUNTOS', paymentMethod: 'PUNTOS_YULIEDPLAY' })}
+                  disabled={isProcessing}
+                  className="w-full py-5 rounded-2xl font-black text-lg text-white bg-orange-500 hover:bg-orange-600 transition-colors uppercase tracking-widest"
+                >
+                  {isProcessing ? 'Procesando...' : 'Confirmar Orden (Pagada con Puntos)'}
                 </button>
               ) : (
                 <WompiCheckout 

@@ -17,6 +17,7 @@
     "@mediapipe/hands": "^0.4.1675469240",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "firebase": "^12.12.1",
     "lucide-react": "^0.546.0",
@@ -24,6 +25,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.8.1",
+    "twilio": "^6.0.1",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

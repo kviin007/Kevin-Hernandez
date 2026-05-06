@@ -15,6 +15,7 @@ interface CartState {
   promoCode: string | null;
   discount: number;
   isDrawerOpen: boolean;
+  pointsToRedeem: number;
   
   // Actions
   addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => void;
@@ -26,6 +27,7 @@ interface CartState {
   toggleDrawer: () => void;
   openDrawer: () => void;
   closeDrawer: () => void;
+  setPointsToRedeem: (points: number, maxUserPoints: number) => void;
   
   // Computed (accessed via getters or hooks in components, but we define them here for convenience if needed, though usually Zustand recommends separate selectors)
 }
@@ -37,6 +39,7 @@ export const useCartStore = create<CartState>()(
       promoCode: null,
       discount: 0,
       isDrawerOpen: false,
+      pointsToRedeem: 0,
 
       addItem: (newItem) => {
         set((state) => {
@@ -83,7 +86,7 @@ export const useCartStore = create<CartState>()(
         });
       },
 
-      clearCart: () => set({ items: [], promoCode: null, discount: 0 }),
+      clearCart: () => set({ items: [], promoCode: null, discount: 0, pointsToRedeem: 0 }),
       
       applyPromo: (code, pctDiscount) => set({ promoCode: code, discount: pctDiscount }),
       
@@ -92,6 +95,17 @@ export const useCartStore = create<CartState>()(
       toggleDrawer: () => set((state) => ({ isDrawerOpen: !state.isDrawerOpen })),
       openDrawer: () => set({ isDrawerOpen: true }),
       closeDrawer: () => set({ isDrawerOpen: false }),
+      setPointsToRedeem: (points, maxUserPoints) => set((state) => {
+        const subtotal = state.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discountAmount = subtotal * (state.discount / 100);
+        const delivery = subtotal > 100000 ? 0 : (state.items.length > 0 ? 10000 : 0);
+        const maxCartValueCOP = subtotal - discountAmount + delivery;
+        const maxCartPoints = maxCartValueCOP > 0 ? Math.floor(maxCartValueCOP / 1000) * 100 : 0;
+        
+        let validPoints = Math.max(0, Math.floor(points / 100) * 100);
+        validPoints = Math.min(validPoints, maxUserPoints, maxCartPoints);
+        return { pointsToRedeem: validPoints };
+      }),
     }),
     {
       name: 'yuliedplay-cart',
@@ -121,7 +135,8 @@ export const useCartStore = create<CartState>()(
       partialize: (state) => ({ 
         items: state.items, 
         promoCode: state.promoCode, 
-        discount: state.discount 
+        discount: state.discount,
+        pointsToRedeem: state.pointsToRedeem
       }),
     }
   )
@@ -139,8 +154,11 @@ export const selectDiscountAmount = (state: CartState) => {
 export const selectTotal = (state: CartState) => {
   const subtotal = selectSubtotal(state);
   const discountAmount = selectDiscountAmount(state);
+  const pointsDiscount = (state.pointsToRedeem / 100) * 1000;
   const delivery = subtotal > 100000 ? 0 : (state.items.length > 0 ? 10000 : 0);
-  return subtotal - discountAmount + delivery;
+  
+  const finalTotal = subtotal - discountAmount - pointsDiscount + delivery;
+  return Math.max(0, finalTotal); // Prevent negative totals
 };
 
 export const selectItemCount = (state: CartState) => 

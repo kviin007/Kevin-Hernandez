@@ -11,6 +11,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { 
   BarChart, 
   Bar, 
@@ -815,6 +816,30 @@ export const AdminView = () => {
                              <option value="completed">Completada</option>
                              <option value="cancelled">Cancelada</option>
                            </select>
+                        </td>
+                        <td className="p-6 text-center">
+                          {booking.status === 'confirmada' && (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={`text-[9px] font-bold uppercase tracking-widest ${booking.reminderSent ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                {booking.reminderSent ? 'ENVIADO' : 'PENDIENTE'}
+                              </span>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const functions = getFunctions();
+                                    const resendReminder = httpsCallable(functions, 'resendReminder');
+                                    await resendReminder({ bookingId: booking.id });
+                                    alert("Recordatorio enviado con éxito.");
+                                  } catch (e: any) {
+                                    alert("Error enviando recordatorio: " + e.message);
+                                  }
+                                }}
+                                className="text-[10px] bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full font-bold hover:bg-emerald-100 transition-colors"
+                              >
+                                Reenviar
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="p-6 text-center">
                           <button 

@@ -22,5 +22,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": ["functions"],
+  "include": [
+    "src",
+    "vite-env.d.ts",
+    "node_modules/vite-plugin-pwa/client"
+  ]
 }

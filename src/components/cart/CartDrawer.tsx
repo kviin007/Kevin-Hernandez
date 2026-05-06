@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCartStore, selectSubtotal, selectDiscountAmount, selectTotal } from '../../stores/cartStore';
-import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight } from 'lucide-react';
+import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Star } from 'lucide-react';
 import { formatCurrency } from '../../utils/format';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; // Adjust to wherever firebase is initialized, likely src/lib/firebase
+import { useAuth } from '../AuthContext';
 
 export const CartDrawer = ({ onNavigateCheckout }: { onNavigateCheckout: () => void }) => {
+  const { profile } = useAuth();
   const { 
     items, 
     isDrawerOpen, 
@@ -16,7 +18,9 @@ export const CartDrawer = ({ onNavigateCheckout }: { onNavigateCheckout: () => v
     promoCode, 
     applyPromo, 
     removePromo,
-    discount
+    discount,
+    pointsToRedeem,
+    setPointsToRedeem
   } = useCartStore();
   
   const subtotal = useCartStore(selectSubtotal);
@@ -208,6 +212,55 @@ export const CartDrawer = ({ onNavigateCheckout }: { onNavigateCheckout: () => v
                   </div>
                 )}
                 
+                {/* Points Code section */}
+                {profile?.points >= 100 && (
+                  <div className="bg-orange-50 border border-orange-100 p-4 rounded-2xl">
+                    <div className="flex justify-between items-center mb-2">
+                       <span className="text-xs font-bold text-orange-600 flex items-center gap-1">
+                          <Star size={14} fill="currentColor" /> Mis Puntos ({(profile.points as number).toLocaleString()})
+                       </span>
+                       <span className="text-[10px] text-orange-500 font-bold bg-white px-2 py-1 rounded-full border border-orange-100">
+                          100 pts = $1.000 COP
+                       </span>
+                    </div>
+                    {pointsToRedeem > 0 ? (
+                      <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-orange-200">
+                        <span className="text-xs font-bold text-slate-700 ml-2">Usando {pointsToRedeem} pts</span>
+                        <button 
+                          onClick={() => setPointsToRedeem(0, profile.points)}
+                          className="text-orange-500 hover:text-orange-700 p-1"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] text-slate-500 mb-1">¿Cuántos puntos deseas usar? (Múltiplos de 100)</span>
+                        <div className="flex gap-2">
+                          <input 
+                            type="number"
+                            min="100"
+                            max={profile.points}
+                            step="100"
+                            id="points-input"
+                            defaultValue="100"
+                            className="flex-1 px-4 py-2 rounded-xl border border-orange-200 bg-white focus:outline-none text-sm text-slate-700"
+                          />
+                          <button 
+                            onClick={() => {
+                              const input = document.getElementById('points-input') as HTMLInputElement;
+                              setPointsToRedeem(parseInt(input.value || '0', 10), profile.points);
+                            }}
+                            className="bg-orange-500 text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-orange-600 transition-colors"
+                          >
+                            Usar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 {/* Summary */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-sm">
@@ -219,6 +272,13 @@ export const CartDrawer = ({ onNavigateCheckout }: { onNavigateCheckout: () => v
                     <div className="flex justify-between items-center text-sm text-emerald-600">
                       <span>Descuento</span>
                       <span className="font-bold">-{formatCurrency(discountAmount)}</span>
+                    </div>
+                  )}
+
+                  {pointsToRedeem > 0 && (
+                    <div className="flex justify-between items-center text-sm text-orange-500">
+                      <span className="flex items-center gap-1"><Star size={12} fill="currentColor" /> Puntos (-{pointsToRedeem})</span>
+                      <span className="font-bold">-{formatCurrency((pointsToRedeem / 100) * 1000)}</span>
                     </div>
                   )}
                   

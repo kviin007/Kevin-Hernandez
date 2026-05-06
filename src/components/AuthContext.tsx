@@ -9,7 +9,7 @@ import {
   createUserWithEmailAndPassword,
   updatePassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
 
 interface AuthContextType {
@@ -40,22 +40,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           const isAdminEmail = user.email === 'admin@yuliedplay.com' || user.email === 'hernandezkevin001998@gmail.com';
           
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            // Force admin role if email matches master list
-            if (isAdminEmail && data.role !== 'admin') {
-              data.role = 'admin';
-              setProfile({ ...data, role: 'admin' });
-              // Silently try to update DB, don't block if rules prevent it yet
-              setDoc(doc(db, 'users', user.uid), { role: 'admin' }, { merge: true }).catch(err => {
-                console.warn("Could not update role in DB, but local admin enabled:", err);
-              });
-            } else {
-              setProfile(data);
-            }
-          } else {
-            // Check if this is a master admin email before defaulting to 'user'
-            const newProfile = {
+          if (!userDoc.exists()) {
+             const newProfile = {
               email: user.email,
               displayName: user.displayName || 'Usuario',
               photoURL: user.photoURL,
@@ -63,11 +49,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               points: isAdminEmail ? 999999 : 0,
               createdAt: serverTimestamp()
             };
-            setProfile(newProfile);
             await setDoc(doc(db, 'users', user.uid), newProfile).catch(err => {
               console.error("Error creating profile:", err);
             });
           }
+
+          // Escuchar cambios en tiempo real en el perfil (como los puntos)
+          const unsubscribeProfile = onSnapshot(doc(db, 'users', user.uid), (docObj) => {
+             if (docObj.exists()) {
+                const data = docObj.data();
+                if (isAdminEmail && data.role !== 'admin') {
+                  data.role = 'admin';
+                  setDoc(doc(db, 'users', user.uid), { role: 'admin' }, { merge: true }).catch(err => {
+                    console.warn("Could not update role in DB, but local admin enabled:", err);
+                  });
+                }
+                setProfile(data);
+             }
+          });
+
+          return () => unsubscribeProfile();
         } else {
           setProfile(null);
         }

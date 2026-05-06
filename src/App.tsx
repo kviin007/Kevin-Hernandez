@@ -73,6 +73,8 @@ import { db, auth, OperationType, handleFirestoreError } from './lib/firebase';
 
 import { WompiCheckout } from './components/checkout/WompiCheckout';
 import { AdminView } from './components/AdminView';
+import { PointsBalance } from './components/points/PointsBalance';
+import { PointsHistory } from './components/points/PointsHistory';
 
 import { 
   BarChart, 
@@ -2272,6 +2274,11 @@ const SettingsView = () => {
           </div>
         )}
       </div>
+      
+      {/* Points Summary Section */}
+      <div className="grid grid-cols-1 gap-6">
+        <PointsBalance />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         <section className="lg:col-span-2 space-y-10">
@@ -2415,6 +2422,10 @@ const SettingsView = () => {
               </div>
             )}
           </div>
+          
+          {/* Points History */}
+          <PointsHistory />
+          
         </section>
 
         <section className="space-y-10">

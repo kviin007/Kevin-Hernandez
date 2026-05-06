@@ -1,6 +1,8 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import * as crypto from "crypto";
+import { addPoints } from "./pointsService";
+import { sendWhatsApp } from "./whatsappService";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -8,7 +10,7 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // Secret from environment or functions config
-const WOMPI_WEBHOOK_SECRET = process.env.WOMPI_WEBHOOK_SECRET || functions.config().wompi.webhook_secret;
+const WOMPI_WEBHOOK_SECRET = process.env.WOMPI_WEBHOOK_SECRET || functions.config().wompi?.webhook_secret;
 
 export const wompiWebhook = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
@@ -32,13 +34,12 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
     let concatenatedValues = "";
 
     properties.forEach((propPath: string) => {
-      // propPath format: "transaction.id"
       const keys = propPath.split(".");
       let val: any = payload.data;
       keys.forEach((key) => {
-        val = val[key];
+        if (val) val = val[key];
       });
-      concatenatedValues += val;
+      concatenatedValues += (val || "");
     });
 
     concatenatedValues += timestamp;
@@ -64,19 +65,18 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
 
   if (event === "transaction.updated") {
     const paymentRef = db.collection("payments").doc(txId);
+    let notificationData: any = null;
     
     await db.runTransaction(async (t) => {
       const paymentDoc = await t.get(paymentRef);
       if (paymentDoc.exists && paymentDoc.data()?.status === status) {
-        // Idempotency: Already processed this exact status
         return;
       }
 
-      const parsedUserId = reference.split("-")[2]; // Assuming YP-timestamp-userId
+      const parsedUserId = reference.split("-")[2];
       const userId = parsedUserId === 'guest' ? null : parsedUserId;
       let relatedDocInfo: { type: string, id: string | null } = { type: 'unknown', id: null };
 
-      // Try to find if the booking exists
       let colToUpdate = "";
       let docIdToUpdate = "";
       
@@ -91,6 +91,45 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
          colToUpdate = "bookings";
          docIdToUpdate = bookingsSnap.docs[0].id;
          relatedDocInfo = { type: 'booking', id: docIdToUpdate };
+         
+         // Fetch booking details for WhatsApp notification if APPROVED
+         if (status === "APPROVED") {
+            const bookingDoc = bookingsSnap.docs[0];
+            const bookingData = bookingDoc.data();
+            let userName = "Cliente";
+            let userPhone = "";
+            let serviceName = "tu servicio";
+
+            if (userId) {
+               const userRef = db.collection("users").doc(userId);
+               const userDoc = await t.get(userRef);
+               if (userDoc.exists) {
+                   userName = userDoc.data()?.displayName || userDoc.data()?.name || "Cliente";
+                   userPhone = userDoc.data()?.phone || "";
+               }
+            } else if (bookingData.phone) {
+               userPhone = bookingData.phone;
+               userName = bookingData.name || "Cliente";
+            }
+
+            if (bookingData.serviceId) {
+               const serviceRef = db.collection("services").doc(bookingData.serviceId);
+               const serviceDoc = await t.get(serviceRef);
+               if (serviceDoc.exists) {
+                   serviceName = serviceDoc.data()?.name || "Servicio YuliedPlay";
+               }
+            }
+
+            if (userPhone) {
+               notificationData = {
+                  phone: userPhone,
+                  name: userName,
+                  date: bookingData.date, // string format normally
+                  time: bookingData.time,
+                  serviceName: serviceName
+               };
+            }
+         }
       }
 
       // Record transaction
@@ -98,7 +137,7 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
         userId: userId || null,
         transactionId: txId,
         reference: reference,
-        amount: amount, // in cents
+        amount: amount,
         status: status,
         method: paymentMethod,
         customerEmail: customerEmail,
@@ -116,19 +155,20 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
 
            // Sum points
            if (userId) {
-              const pointsEarned = Math.floor((amount / 100) * 0.05); // 5% of COP amount
+              const amountCOP = amount / 100;
+              let pointsEarned = 0;
+              let description = "";
+
+              if (colToUpdate === 'orders') {
+                pointsEarned = Math.floor(amountCOP / 1000);
+                description = `Puntos por compra #${reference}`;
+              } else if (colToUpdate === 'bookings') {
+                pointsEarned = 10 + Math.floor(amountCOP / 1000);
+                description = `Puntos por cita #${reference}`;
+              }
+
               if (pointsEarned > 0) {
-                 t.update(db.collection("users").doc(userId), {
-                    points: admin.firestore.FieldValue.increment(pointsEarned)
-                 });
-                 // Log points
-                 t.set(db.collection("points_logs").doc(), {
-                    userId,
-                    amount: pointsEarned,
-                    type: "earn",
-                    description: `Puntos por pago de ${colToUpdate === 'orders' ? 'pedido' : 'cita'} ${reference}`,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp()
-                 });
+                 await addPoints(t, userId, pointsEarned, description, docIdToUpdate, 'earned');
               }
            }
         } else if (status === "DECLINED" || status === "VOIDED" || status === "ERROR") {
@@ -139,6 +179,31 @@ export const wompiWebhook = functions.https.onRequest(async (req, res) => {
         }
       }
     });
+
+    // Send WhatsApp AFTER transaction completes
+    if (notificationData) {
+       try {
+           const [year, month, day] = notificationData.date.split("-").map(Number);
+           const dateObj = new Date(year, month - 1, day);
+           const formattedDate = new Intl.DateTimeFormat('es-CO', { 
+              weekday: 'long', 
+              day: 'numeric', 
+              month: 'long', 
+              timeZone: 'America/Bogota' 
+           }).format(dateObj);
+
+           const message = `Hola ${notificationData.name} 💅 Tu cita en YuliedPlay está confirmada.
+📅 Fecha: ${formattedDate}
+⏰ Hora: ${notificationData.time}
+💆 Servicio: ${notificationData.serviceName}
+📍 Dirección: Instalaciones YuliedPlay
+¿Necesitas cancelar o cambiar tu cita? Escríbenos aquí.`;
+
+           await sendWhatsApp(notificationData.phone, message);
+       } catch (error) {
+           console.error("Error formatting date or sending WhatsApp:", error);
+       }
+    }
 
     res.status(200).send("Webhook Processed");
   } else {
