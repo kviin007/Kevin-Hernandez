@@ -5,6 +5,7 @@ import './index.css';
 
 import {AuthProvider} from './components/AuthContext.tsx';
 import { setupPWA } from './registerSW';
+import { safeParse } from './utils/safeParse';
 
 // Clean up corrupted storage that might crash external libraries
 try {
@@ -19,9 +20,7 @@ try {
       } else {
         // Safe check for JSON validity if it looks like it should be JSON
         if (normalized.startsWith('{') || normalized.startsWith('[')) {
-           try {
-             JSON.parse(normalized);
-           } catch(e) {
+           if (!safeParse(normalized, null)) {
              keysToRemove.push(key);
            }
         }
