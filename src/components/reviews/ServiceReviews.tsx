@@ -25,7 +25,7 @@ export const ServiceReviews = ({ serviceId }: ServiceReviewsProps) => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const revs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const revs: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       // Sort client-side
       revs.sort((a, b) => {
          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;

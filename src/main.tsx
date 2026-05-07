@@ -8,17 +8,29 @@ import { setupPWA } from './registerSW';
 
 // Clean up corrupted storage that might crash external libraries
 try {
-  const keysToRemove = [];
+  const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key) {
       const val = localStorage.getItem(key);
-      if (val === 'undefined') {
+      const normalized = val?.trim();
+      if (!normalized || normalized === 'undefined' || normalized === 'null' || normalized === 'NaN' || normalized === '""') {
         keysToRemove.push(key);
+      } else {
+        // Safe check for JSON validity if it looks like it should be JSON
+        if (normalized.startsWith('{') || normalized.startsWith('[')) {
+           try {
+             JSON.parse(normalized);
+           } catch(e) {
+             keysToRemove.push(key);
+           }
+        }
       }
     }
   }
-  keysToRemove.forEach(k => localStorage.removeItem(k));
+  keysToRemove.forEach(k => {
+    try { localStorage.removeItem(k); } catch(e) {}
+  });
 } catch (e) {
   // Ignore
 }

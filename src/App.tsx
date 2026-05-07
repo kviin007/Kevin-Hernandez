@@ -50,6 +50,7 @@ import { OrderConfirmada } from './pages/OrderConfirmada';
 import { NailDesigner } from './pages/NailDesigner';
 import { ServiceReviews } from './components/reviews/ServiceReviews';
 import { UserBookings } from './components/bookings/UserBookings';
+import { safeParse } from './utils/safeParse';
 import { CartIcon } from './components/cart/CartIcon';
 import { CartDrawer } from './components/cart/CartDrawer';
 import { ProductCard } from './components/products/ProductCard';
@@ -962,7 +963,7 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
     setIsGenerating(true);
     try {
       const response = await (ai as any).models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: `Eres un diseñador de uñas experto de lujo. Basado en esta solicitud: "${musePrompt}", genera un concepto de diseño exclusivo. 
         Devuelve un JSON con:
         - name: Nombre creativo del diseño
@@ -977,24 +978,7 @@ const AIStudioView = ({ setView }: { setView: (v: View) => void }) => {
       const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
       
       let data = {};
-      try {
-        const textToParse = typeof cleanText === 'string' ? cleanText : JSON.stringify(cleanText);
-        if (textToParse && textToParse !== 'undefined' && textToParse !== 'null' && textToParse.trim() !== '') {
-          data = JSON.parse(textToParse);
-        }
-      } catch (parseError) {
-        console.error('Error parsing AI response:', parseError);
-        // Try to extract JSON if it was buried in text
-        const textToMatch = typeof cleanText === 'string' ? cleanText : '';
-        const jsonMatch = textToMatch.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            data = JSON.parse(jsonMatch[0]);
-          } catch (innerError) {
-            console.error('Final attempt to parse AI response failed:', innerError);
-          }
-        }
-      }
+      data = safeParse(cleanText, {});
       
       setAiSuggestion(data);
       

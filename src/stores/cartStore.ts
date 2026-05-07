@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { safeParse } from '../utils/safeParse';
 
 export interface CartItem {
   id: string;
@@ -111,23 +112,17 @@ export const useCartStore = create<CartState>()(
       name: 'yuliedplay-cart',
       storage: createJSONStorage(() => ({
         getItem: (name) => {
-          try {
-            const val = localStorage.getItem(name);
-            if (!val || val === 'undefined' || val === 'null' || val === '""') return null;
-            // Verify it's valid JSON before returning to zustand
-            // Also ensure it's not the string "undefined" after potential double stringification
-            const parsed = JSON.parse(val);
-            if (parsed === undefined || parsed === null) return null;
-            return val;
-          } catch (e) {
-            console.error('Removed corrupted storage for:', name, e);
-            localStorage.removeItem(name);
-            return null;
-          }
+          const val = localStorage.getItem(name);
+          const normalized = val?.trim();
+          if (!normalized || normalized === 'undefined' || normalized === 'null' || normalized === '""' || normalized === 'NaN') return null;
+          if (safeParse(normalized, null)) return normalized;
+          try { localStorage.removeItem(name); } catch(e) {}
+          return null;
         },
         setItem: (name, value) => {
-          if (value && value !== 'undefined') {
-            localStorage.setItem(name, value);
+          const normalized = value?.trim();
+          if (normalized && normalized !== 'undefined' && normalized !== 'null' && normalized !== '""' && normalized !== 'NaN') {
+            localStorage.setItem(name, normalized);
           }
         },
         removeItem: (name) => localStorage.removeItem(name),

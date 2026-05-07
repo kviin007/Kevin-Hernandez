@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { safeParse } from "../utils/safeParse";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -75,8 +76,8 @@ Descripción de la clienta: ${promptData.description}
     }
   };
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+  const response = await (ai as any).models.generateContent({
+    model: "gemini-3-flash-preview",
     contents: prompt,
     config: {
       systemInstruction: `Eres una nail artist experta colombiana con 10 años de experiencia. 
@@ -89,20 +90,10 @@ El tono es cálido, femenino y entusiasta.`,
     }
   });
 
-  if (!response.text) {
+  const text = response.text || '';
+  if (!text) {
       throw new Error("No se pudo generar el diseño, intenta de nuevo.");
   }
 
-  try {
-      const designs: NailDesign[] = JSON.parse(response.text);
-      return designs;
-  } catch (e) {
-      console.error("Error parsing Gemini response:", e);
-      // Fallback in case the schema wasn't strictly followed but looks close
-      const match = response.text.match(/\[[\s\S]*\]/);
-      if (match) {
-          return JSON.parse(match[0]);
-      }
-      throw new Error("Error procesando las propuestas de diseño.");
-  }
+  return safeParse<NailDesign[]>(text, []);
 };

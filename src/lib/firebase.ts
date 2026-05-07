@@ -7,7 +7,25 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const storage = getStorage(app);
+
+// Safer storage initialization
+let firebaseStorage: any;
+try {
+  if (firebaseConfig.storageBucket) {
+    firebaseStorage = getStorage(app);
+  } else {
+    console.warn("Firebase Storage bucket not configured in firebase-applet-config.json");
+  }
+} catch (e) {
+  console.error("Error initializing Firebase Storage:", e);
+}
+
+// Fallback mock if storage fails to initialize (to avoid crashing imports)
+export const storage = firebaseStorage || {
+  _isMock: true,
+  ref: () => { throw new Error("Firebase Storage is not enabled or available."); }
+};
+
 export const googleProvider = new GoogleAuthProvider();
 
 // Standard error handler for Firestore permissions
