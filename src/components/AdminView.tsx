@@ -39,7 +39,8 @@ import {
   Paperclip,
   CheckCircle2,
   Bell,
-  LogOut
+  LogOut,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -51,7 +52,8 @@ export const AdminView = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [promotions, setPromotions] = useState<any[]>([]);
   const [availability, setAvailability] = useState<any[]>([]);
-  const [viewType, setViewType] = useState<'services' | 'products' | 'customers' | 'promos' | 'slots' | 'bookings' | 'orders'>('services');
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [viewType, setViewType] = useState<'services' | 'products' | 'customers' | 'promos' | 'slots' | 'bookings' | 'orders' | 'reviews'>('services');
   const [adminActionStatus, setAdminActionStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   const showStatus = (type: 'success' | 'error', message: string) => {
@@ -70,6 +72,7 @@ export const AdminView = () => {
     const oQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const prQuery = query(collection(db, 'promotions'));
     const aQuery = query(collection(db, 'availability'));
+    const rQuery = query(collection(db, 'reviews'), orderBy('createdAt', 'desc'));
 
     const unsubS = onSnapshot(sQuery, (snap) => setServices(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'services'));
     const unsubP = onSnapshot(pQuery, (snap) => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'products'));
@@ -78,8 +81,9 @@ export const AdminView = () => {
     const unsubO = onSnapshot(oQuery, (snap) => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'orders'));
     const unsubPR = onSnapshot(prQuery, (snap) => setPromotions(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'promotions'));
     const unsubA = onSnapshot(aQuery, (snap) => setAvailability(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'availability'));
+    const unsubR = onSnapshot(rQuery, (snap) => setReviews(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => handleFirestoreError(err, OperationType.GET, 'reviews'));
 
-    return () => { unsubS(); unsubP(); unsubC(); unsubB(); unsubO(); unsubPR(); unsubA(); };
+    return () => { unsubS(); unsubP(); unsubC(); unsubB(); unsubO(); unsubPR(); unsubA(); unsubR(); };
   }, []);
 
   const addService = async () => {
@@ -318,7 +322,8 @@ export const AdminView = () => {
             { id: 'slots', label: 'Horarios', icon: Calendar },
             { id: 'customers', label: 'Clientes', icon: Award },
             { id: 'bookings', label: 'Citas', icon: Calendar },
-            { id: 'orders', label: 'Pedidos', icon: ShoppingBag }
+            { id: 'orders', label: 'Pedidos', icon: ShoppingBag },
+            { id: 'reviews', label: 'Reseñas', icon: Star }
           ].map((tab) => (
             <button 
               key={tab.id}
@@ -900,6 +905,100 @@ export const AdminView = () => {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewType === 'reviews' && (
+        <div className="grid grid-cols-1 gap-10">
+          <div className="flex justify-between items-end px-4">
+            <div>
+              <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">Reseñas de Clientes</h3>
+              <p className="text-slate-500 italic mt-2">Aprobación y Moderación</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[40px] border border-pink-50 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-pink-50">
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400">Cliente / Fecha</th>
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400">Servicio / Cita</th>
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400">Reseña</th>
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400">Fotos</th>
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400">Estado</th>
+                    <th className="p-6 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviews.map(review => {
+                    const service = services.find(s => s.id === review.serviceId);
+                    const isPending = review.status === 'pending';
+                    return (
+                      <tr key={review.id} className="border-b border-pink-50/50 hover:bg-slate-50/50 transition-colors">
+                        <td className="p-6">
+                          <p className="font-bold text-slate-800 text-sm">{review.userName || 'Anónimo'}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                             {review.createdAt?.toDate ? review.createdAt.toDate().toLocaleDateString() : ''}
+                          </p>
+                        </td>
+                        <td className="p-6">
+                           <p className="font-bold text-slate-800 text-xs">{service?.name || 'Servicio Desconocido'}</p>
+                        </td>
+                        <td className="p-6 w-1/3">
+                           <div className="flex items-center gap-1 text-yellow-400 mb-1">
+                             {[1, 2, 3, 4, 5].map(star => (
+                               <Star key={star} size={10} className={star <= review.rating ? 'fill-current' : 'text-slate-200 fill-slate-200'} />
+                             ))}
+                           </div>
+                           <p className="text-xs text-slate-600 line-clamp-2" title={review.comment}>{review.comment}</p>
+                        </td>
+                        <td className="p-6">
+                           {review.photoBeforeUrl || review.photoAfterUrl ? (
+                             <div className="flex gap-2">
+                               {review.photoBeforeUrl && <img src={review.photoBeforeUrl} className="w-8 h-8 rounded-lg object-cover cursor-pointer" alt="Antes" onClick={() => window.open(review.photoBeforeUrl, '_blank')} />}
+                               {review.photoAfterUrl && <img src={review.photoAfterUrl} className="w-8 h-8 rounded-lg object-cover cursor-pointer" alt="Después" onClick={() => window.open(review.photoAfterUrl, '_blank')} />}
+                             </div>
+                           ) : <span className="text-[10px] text-slate-400">Ninguna</span>}
+                        </td>
+                        <td className="p-6">
+                           <span className={`status-pill ${
+                             review.status === 'approved' ? 'pill-green' : 
+                             review.status === 'rejected' ? 'pill-red' : 'pill-amber'
+                           }`}>
+                             {review.status === 'approved' ? 'Aprobada' : review.status === 'rejected' ? 'Rechazada' : 'Pendiente'}
+                           </span>
+                        </td>
+                        <td className="p-6 text-center">
+                           <div className="flex justify-center gap-2">
+                             <button
+                               onClick={() => updateItem('reviews', review.id, { status: 'approved' })}
+                               disabled={review.status === 'approved'}
+                               className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${review.status === 'approved' ? 'bg-slate-100 text-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                             >
+                               Aprobar
+                             </button>
+                             <button
+                               onClick={() => updateItem('reviews', review.id, { status: 'rejected' })}
+                               disabled={review.status === 'rejected'}
+                               className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${review.status === 'rejected' ? 'bg-slate-100 text-slate-400 opacity-50 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                             >
+                               Ocultar
+                             </button>
+                           </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {reviews.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-10 text-center text-slate-400 text-sm font-medium">No hay reseñas para mostrar.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

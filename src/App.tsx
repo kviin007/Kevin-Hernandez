@@ -39,13 +39,17 @@ import {
   Camera,
   Brain,
   Instagram,
-  Zap
+  Zap,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from './components/AuthContext';
 import { Checkout } from './pages/Checkout';
 import { OrderConfirmada } from './pages/OrderConfirmada';
+import { NailDesigner } from './pages/NailDesigner';
+import { ServiceReviews } from './components/reviews/ServiceReviews';
+import { UserBookings } from './components/bookings/UserBookings';
 import { CartIcon } from './components/cart/CartIcon';
 import { CartDrawer } from './components/cart/CartDrawer';
 import { ProductCard } from './components/products/ProductCard';
@@ -164,7 +168,7 @@ const BrandLogo = ({ size = 'md', showSlogan = false }: { size?: 'sm' | 'md' | '
 };
 
 // --- Types ---
-type View = 'landing' | 'grid' | 'shop' | 'booking' | 'loyalty' | 'settings' | 'messaging' | 'help' | 'checkout' | 'admin' | 'services_list' | 'ai_studio' | 'order_confirmada';
+type View = 'landing' | 'grid' | 'shop' | 'booking' | 'loyalty' | 'settings' | 'messaging' | 'help' | 'checkout' | 'admin' | 'services_list' | 'ai_studio' | 'order_confirmada' | 'nail_designer';
 
 // --- New Auth Sub-component ---
 const AuthView = () => {
@@ -422,7 +426,8 @@ const Sidebar = ({ activeView, setView, isMobile = false }: { activeView: View, 
   const baseMenuItems = [
     { id: 'landing', label: 'Inicio', icon: Grid3X3 },
     { id: 'services_list', label: 'Servicios', icon: Zap },
-    { id: 'ai_studio', label: 'AI Nail Studio', icon: Sparkles },
+    { id: 'nail_designer', label: 'Nail Designer AI', icon: Sparkles },
+    { id: 'ai_studio', label: 'Moodboard', icon: Sparkles },
     { id: 'booking', label: 'Reservar Cita', icon: Calendar },
     { id: 'shop', label: 'Tienda Online', icon: ShoppingBag },
     { id: 'loyalty', label: 'Mis Puntos', icon: Award },
@@ -589,6 +594,7 @@ const ServicesView = ({ setView }: { setView: (v: View) => void }) => {
   const [services, setServices] = useState<any[]>([]);
   const { isAdmin } = useAuth();
   const [activeIndex, setActiveIndex] = useState(0);
+  const [selectedServiceForReviews, setSelectedServiceForReviews] = useState<any>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'services'));
@@ -694,7 +700,20 @@ const ServicesView = ({ setView }: { setView: (v: View) => void }) => {
             </div>
             <div className="p-10 flex flex-col flex-1">
               <h3 className="text-2xl font-black text-slate-800 font-h1 italic leading-tight mb-4">{s.name}</h3>
-              <p className="text-sm text-slate-500 italic leading-relaxed line-clamp-3 mb-10 flex-1">{s.description}</p>
+              <p className="text-sm text-slate-500 italic leading-relaxed line-clamp-3 mb-6 flex-1">{s.description}</p>
+              
+              {/* Reviews Preview/Button */}
+              <button 
+                onClick={() => setSelectedServiceForReviews(s)}
+                className="flex items-center gap-2 mb-6 text-[10px] font-bold uppercase tracking-widest text-pink-500 hover:text-pink-600 transition-colors"
+              >
+                <div className="flex items-center gap-1 text-yellow-400">
+                  <Star size={14} className="fill-current" />
+                  <span className="text-slate-600">{s.averageRating ? s.averageRating.toFixed(1) : 'Nuevo'}</span>
+                </div>
+                <span>({s.totalReviews || 0} reseñas)</span>
+              </button>
+
               <button 
                 onClick={() => setView('booking')}
                 className="w-full py-4 bg-slate-50 text-primary border border-pink-100 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-primary hover:text-white hover:border-primary transition-all flex items-center justify-center gap-2 shadow-sm"
@@ -705,6 +724,42 @@ const ServicesView = ({ setView }: { setView: (v: View) => void }) => {
           </motion.div>
         ))}
       </div>
+
+      {/* Reviews Modal */}
+      <AnimatePresence>
+        {selectedServiceForReviews && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }} 
+              animate={{ scale: 1, y: 0 }} 
+              exit={{ scale: 0.95, y: 20 }} 
+              className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="flex items-center justify-between p-8 border-b border-pink-50">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-800 font-h1 italic tracking-tight">Reseñas del servicio</h2>
+                  <p className="text-sm font-medium text-slate-500 italic">{selectedServiceForReviews.name}</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedServiceForReviews(null)}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-8 overflow-y-auto custom-scrollbar">
+                <ServiceReviews serviceId={selectedServiceForReviews.id} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -2423,6 +2478,9 @@ const SettingsView = () => {
             )}
           </div>
           
+          {/* User Bookings */}
+          <UserBookings />
+
           {/* Points History */}
           <PointsHistory />
           
@@ -2669,6 +2727,7 @@ export default function App() {
       case 'landing': return <LandingView setView={setView} />;
       case 'services_list': return <ServicesView setView={setView} />;
       case 'ai_studio': return <AIStudioView setView={setView} />;
+      case 'nail_designer': return <NailDesigner setView={setView} />;
       case 'grid': return <GridView />;
       case 'shop': return <ShopView setView={setView} />;
       case 'booking': return <BookingView />;

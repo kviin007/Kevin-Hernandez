@@ -1,6 +1,8 @@
 {
-  "name": "YULIED PLAY",
+  "name": "YULIEHT",
   "description": "Premium Beauty & Wellness Ecosystem. Redefining high-end aesthetic experiences through seamless technology.",
-  "requestFramePermissions": ["camera"],
+  "requestFramePermissions": [
+    "camera"
+  ],
   "majorCapabilities": []
 }
